@@ -1,0 +1,98 @@
+
+clear all
+
+cd "/Users/clairekim/Desktop/Project/Child Development/STATA"
+
+use empirics, clear
+
+***** Reshape the data *****
+
+sort id_child agey
+
+/* keep id_child agey mathraw mathpercent mathstandard readraw readpercent readstandard ppvtraw ppvtpercent ppvtstandard girlroleb girlrolec girlrolee girlrolef
+
+reshape wide mathraw mathpercent mathstandard readraw readpercent readstandard ppvtraw ppvtpercent ppvtstandard girlroleb girlrolec girlrolee girlrolef, i(id_child) j(agey) */
+
+keep id_child agey mathstandard readstandard compstandard girlroleb girlrolec girlrolee girlrolef
+
+reshape wide mathstandard readstandard compstandard girlroleb girlrolec girlrolee girlrolef, i(id_child) j(agey)
+
+* Create 3-period variables
+
+gen math1 = mathstandard10
+gen read1 = readstandard10
+gen comp1 = compstandard10
+gen girlb1 = girlroleb10
+gen girlc1 = girlrolec10
+gen girle1 = girlrolee10
+gen girlf1 = girlrolef10 // period 1
+
+gen math2 = mathstandard12
+replace math2 = mathstandard11 if math2 == . & mathstandard11 ~= .
+gen read2 = readstandard12
+replace read2 = readstandard11 if read2 == . & readstandard11 ~= .
+gen comp2 = compstandard12
+replace comp2 = compstandard11 if comp2 == . & compstandard11 ~= .
+gen girlb2 = girlroleb12
+replace girlb2 = girlroleb11 if girlb2 == . & girlroleb11 ~= .
+gen girlc2 = girlrolec12
+replace girlc2 = girlrolec11 if girlc2 == . & girlrolec11 ~= .
+gen girle2 = girlrolee12
+replace girle2 = girlrolee11 if girle2 == . & girlrolee11 ~= .
+gen girlf2 = girlrolef12 
+replace girlf2 = girlrolef11 if girlf2 == . & girlrolef11 ~= . // period 2
+
+gen math3 = mathstandard14
+replace math3 = mathstandard13 if math3 == . & mathstandard13 ~= .
+gen read3 = readstandard14
+replace read3 = readstandard13 if read3 == . & readstandard13 ~= .
+gen comp3 = compstandard14
+replace comp3 = compstandard13 if comp3 == . & compstandard13 ~= .
+gen girlb3 = girlroleb14
+replace girlb3 = girlroleb13 if girlb3 == . & girlroleb13 ~= .
+gen girlc3 = girlrolec14
+replace girlc3 = girlrolec13 if girlc3 == . & girlrolec13 ~= .
+gen girle3 = girlrolee14
+replace girle3 = girlrolee13 if girle3 == . & girlrolee13 ~= .
+gen girlf3 = girlrolef14 
+replace girlf3 = girlrolef13 if girlf3 == . & girlrolef13 ~= . // period 3
+
+keep id_child math1 math2 math3 read1 read2 read3 comp1 comp2 comp3 girlb1 girlb2 girlb3 girlc1 girlc2 girlc3 girle1 girle2 girle3 girlf1 girlf2 girlf3
+
+sort id_child
+
+save "/Users/clairekim/Desktop/Project/Child Development/STATA/factor_n_temp.dta", replace
+
+***** Merge Data ******
+
+use empirics, clear
+
+keep id_child female
+
+duplicates report id_child female
+
+duplicates list id_child female
+
+duplicates drop id_child female, force
+
+sort id_child
+
+merge id_child using factor_n_temp
+
+drop _merge
+
+egen any_missing = rowmiss(_all)
+
+drop if any_missing > 0 // Drop individuals if all measures are missing
+
+foreach var of varlist _all {
+		replace `var' = -999 if `var' == .
+	}
+
+* Export specified variables without labels to CSV file
+export delimited id_child math1 read1 comp1 girlb1 girlc1 girle1 girlf1 math2 read2 comp2 girlb2 girlc2 girle2 girlf2 math3 read3 comp3 girlb3 girlc3 girle3 girlf3 if female == 1 using "/Users/clairekim/Desktop/Project/Child Development/julia/data_meas_f.csv", replace nolabel
+
+export delimited id_child math1 read1 comp1 girlb1 girlc1 girle1 girlf1 math2 read2 comp2 girlb2 girlc2 girle2 girlf2 math3 read3 comp3 girlb3 girlc3 girle3 girlf3 if female == 0 using "/Users/clairekim/Desktop/Project/Child Development/julia/data_meas_m.csv", replace nolabel
+
+histogram girlb2 if girlb2 ~= -999, percent xtitle("A girl could let a boy know she is smarter than he is")
+graph export "/Users/clairekim/Desktop/Project/Child Development/STATA/Figures/cens.png", replace as(png) name("Graph")
