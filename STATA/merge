@@ -1,0 +1,24 @@
+
+******** Make a Panel **********
+
+cd "/Users/clairekim/Desktop/Project/Child Development/STATA"
+
+use raw, clear
+
+sort id_mom
+
+merge id_mom using parent
+
+drop if id_child == .
+
+drop _merge
+
+save "/Users/clairekim/Desktop/Project/Child Development/STATA/merge.dta", replace
+
+* Loop over each variable in the dataset
+foreach var of varlist _all {
+    * Replace negative values with missing values
+    replace `var' = . if `var' < 0
+}
+
+save "/Users/clairekim/Desktop/Project/Child Development/STATA/merge.dta", replace
