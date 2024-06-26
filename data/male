@@ -1,0 +1,87 @@
+using LinearAlgebra, Statistics, Distributions, CSV, DataFrames
+
+# Define the path to the data
+path = "/Users/clairekim/Desktop/Project/Child Development/julia"
+
+# Read in Female Data
+data = CSV.File(joinpath(path, "data_meas_m.csv")) |> DataFrame
+
+# Sort Data by ID
+sort!(data, :id_child)
+
+# Check Uniqueness of IDs
+unique_ids = unique(data.id_child)
+n_i = length(unique_ids)
+if length(unique_ids) != n_i
+    error("Non-unique IDs")
+end
+
+# Define measurement variables
+meas_vars_1 = [
+    (:math1, :read1, :comp1), # Age 10
+    (:girlb1, :girlc1, :girle1, :girlf1) # Age 10
+]
+
+# Define measurement variables
+meas_vars_2 = [
+    (:math2, :read2, :comp2), # Age 11 - 12
+    (:girlb2, :girlc2, :girle2, :girlf2) # Age 11 - 12
+]
+
+# Define measurement variables
+meas_vars_3 = [
+    (:math3, :read3, :comp3), # Age 13 - 14
+    (:girlb3, :girlc3, :girle3, :girlf3)  # Age 13 - 14
+]
+
+# Read in Inputs information
+meas_data_1 = [getproperty(data, meas) for meas_group in meas_vars_1 for meas in meas_group]
+meas_data_2 = [getproperty(data, meas) for meas_group in meas_vars_2 for meas in meas_group]
+meas_data_3 = [getproperty(data, meas) for meas_group in meas_vars_3 for meas in meas_group]
+
+# Create dictionary
+data_n_dict_1_m = Dict(:pid => data.id_child, [Symbol("meas$i") => meas_data_1[i] for i in 1:length(meas_data_1)]...)
+data_n_dict_2_m = Dict(:pid => data.id_child, [Symbol("meas$i") => meas_data_2[i] for i in 1:length(meas_data_2)]...)
+data_n_dict_3_m = Dict(:pid => data.id_child, [Symbol("meas$i") => meas_data_3[i] for i in 1:length(meas_data_3)]...)
+
+# Create DataFrame from the dictionary
+data_n_1_m = DataFrame(data_n_dict_1_m)
+data_n_2_m = DataFrame(data_n_dict_2_m)
+data_n_3_m = DataFrame(data_n_dict_3_m)
+
+# Save results
+filename = joinpath(path, "data_n_meas_1_m.csv")
+if isempty(data_n_1_m)
+    println("No data to write.")
+else
+    try
+        CSV.write(filename, data_n_1_m)
+        println("File saved successfully at $filename")
+    catch e
+        println("Error saving file: $e")
+    end    
+end
+
+filename = joinpath(path, "data_n_meas_2_m.csv")
+if isempty(data_n_2_m)
+    println("No data to write.")
+else
+    try
+        CSV.write(filename, data_n_2_m)
+        println("File saved successfully at $filename")
+    catch e
+        println("Error saving file: $e")
+    end    
+end
+
+filename = joinpath(path, "data_n_meas_3_m.csv")
+if isempty(data_n_3_m)
+    println("No data to write.")
+else
+    try
+        CSV.write(filename, data_n_3_m)
+        println("File saved successfully at $filename")
+    catch e
+        println("Error saving file: $e")
+    end    
+end
