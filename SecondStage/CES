@@ -1,0 +1,46 @@
+using Optim, LinearAlgebra, Statistics, Distributions, CSV, DataFrames, Random
+
+#println("Before changing directory")
+cd("/Users/clairekim/Desktop/Project/Child Development/julia")
+
+# Define TFP terms
+function TFP(ψ, data::DataFrame)
+    n = length(unique(data.pid))
+    # Initialize TFP terms
+    A_c = zeros(Float64, n, 3)
+    A_b = zeros(Float64, n, 3)
+
+    # Precompute the valid indices
+    valid_indices = [data[(i - 1) * 3 + 1] != -999 for i in 1:n] # n X 1 Array
+
+    for i in 1:n
+        for t in 1:3
+            if valid_indices[(i - 1) * t + 1]
+                A_c[i, t] = exp(ψ0_c[t] + x * ψ_c[t] + ν_c) 
+                A_b[i, t] = exp(ψ0_b[t] + x * ψ_b[t] + ν_b)
+            end
+        end
+    end
+
+    return A_c, A_b 
+end
+
+# Define the CES function
+function nested_ces()
+     = params
+    inner =
+    A_c, A_b = TFP()
+    log(y_c) = log(A_c) + (1 / ρ_c) * log(inner)
+    log(y_b) = log(A_b) + (1 / ρ_b) * log(inner)
+
+    return log(y_c), log(y_b)
+end
+
+# Define the objective function for optimization
+(*function objective()
+    y_hat = nested_ces()
+    return sum((y .- y_hat).^2)
+end
+
+# Perform nonlinear least sqaures estimation
+result_fin_f = optimize(params -> objective(), initial_params)
