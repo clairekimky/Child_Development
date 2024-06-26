@@ -3,44 +3,148 @@ using Optim, LinearAlgebra, Statistics, Distributions, CSV, DataFrames, Random
 #println("Before changing directory")
 cd("/Users/clairekim/Desktop/Project/Child Development/julia")
 
-# Define TFP terms
-function TFP(ψ, data::DataFrame)
-    n = length(unique(data.pid))
-    # Initialize TFP terms
-    A_c = zeros(Float64, n, 3)
-    A_b = zeros(Float64, n, 3)
+function draw_theta(factors, data::DataFrame)
+    println("Inside factor draw")
+    n = length(unique(data.pid))  # Number of individuals
+    K = 2 # Number of latent factors
+    θ_samples = zeros(Float64, n, K)  # a 2-dimensional array (or matrix) of size (n X R X K) filled with zeros
 
-    # Precompute the valid indices
-    valid_indices = [data[(i - 1) * 3 + 1] != -999 for i in 1:n] # n X 1 Array
+    k1 = factors[1:2]
+    Δ1 = reshape(factors[3:6], 2, 2)
+    k1 = factors[7:8]
+    Δ1 = reshape(factors[9:12], 2, 2)
+    k1 = factors[13:14]
+    Δ1 = reshape(factors[15:18], 2, 2)
+    k1 = factors[19:20]
+    Δ1 = reshape(factors[21:24], 2, 2)
+    κ = factors[25:end]
+    
+    # Cholesky decompositions of the covariance matrices
+    L1 = cholesky(Δ1).L
+    L2 = cholesky(Δ2).L
+    L3 = cholesky(Δ3).L
+    L4 = cholesky(Δ4).L
 
     for i in 1:n
-        for t in 1:3
+        # Draw a random sample from a Bernoulli distribution with probability κ
+        u = rand()
+        if u < κ[1]
+            z = randn(length(k1))
+            θ_samples[i, :] = k1 + L1*z
+        elseif u < κ[1] + κ[2]
+            z = randn(length(k2))
+            θ_samples[i, :] = k2 + L2*z
+        elseif u < κ[1] + κ[2] + κ[3]
+            z = randn(length(k3))
+            θ_samples[i, :] = k3 + L3*z
+        else
+            z = randn(length(k4))
+            θ_samples[i, :] = k4 + L4*z        
+        end
+    end
+
+    return θ_samples # n X K Array
+end
+
+# Define TFP terms
+function TFP(params, data::DataFrame)
+    n = length(unique(data.pid))
+    T = length(unique(data.age))
+
+    # Initialize TFP terms
+    A_c = ones(Float64, n, t)
+    A_b = ones(Float64, n, t)
+    
+    # Precompute the valid indices
+    valid_indices = [data[(i - 1) * t + 1] != -999 for i in 1:n, t in 1:T] # n X 1 Array
+
+    # (1) Cognition
+    ψ_c = params[]
+    ψ_0c = params[]
+    σ_νc = params[]
+    # (2) Gender Role Perceptions
+    ψ_b = params[]
+    ψ_0b = params[]
+    σ_νb = params[]
+
+    for i in 1:n
+        for t in 1:T
             if valid_indices[(i - 1) * t + 1]
-                A_c[i, t] = exp(ψ0_c[t] + x * ψ_c[t] + ν_c) 
-                A_b[i, t] = exp(ψ0_b[t] + x * ψ_b[t] + ν_b)
+                #x = [data[i, Symbol("urban", j)]]
+                ν_c = σ_νc[t] * randn()
+                ν_b = σ_νb[t] * randn()
+                A_c[i, t] = exp(ψ_0c[t] + x' * ψ_c[t] + ν_c) 
+                A_b[i, t] = exp(ψ_0b[t] + x' * ψ_b[t] + ν_b)
             end
         end
     end
 
-    return A_c, A_b 
+    return A_c, A_b # n by T Array
 end
 
 # Define the CES function
-function nested_ces()
-     = params
-    inner =
-    A_c, A_b = TFP()
-    log(y_c) = log(A_c) + (1 / ρ_c) * log(inner)
-    log(y_b) = log(A_b) + (1 / ρ_b) * log(inner)
+function nested_ces(factors1, factors2, params, data::DataFrame)
+    n = length(unique(data.pid))
+    T = length(unique(data.age))
 
-    return log(y_c), log(y_b)
+    # Initialize inner nests
+    inner_c = zeros(Float64, n, T - 1)
+    inner_b = zeros(Float64, n, T - 1)
+    y_c = zeros(Float64, n, T - 1)
+    y_b = zeros(Float64, n, T - 1)
+
+    # (1) Cognition
+    δ_cc = params[] 
+    δ_bc = params[] 
+    δ_Ic = params[]
+    ρ_c = params[]
+    # (2) Gender Role Perceptions
+    δ_cb = params[] 
+    δ_bb = params[] 
+    δ_Ib = params[] 
+    ρ_b = params[]
+
+    θ1 = draw_theta(factors1, data) # n X T X K Array
+    θ2 = draw_theta(factors2, data) # n X T X K Array
+    A_c, A_b = TFP(params, data)
+
+    # t = 1
+    for i in 1:n
+        I[i, 1] = data[i, Symbol("investment", 1)]
+        inner_c[i, 1] = δ_cc[1] * θ1[i, 1]^ρ_c[1] + δ_bc[1] * θ1[i, 2]^ρ_c[1] + δ_Ic[1] * I[i, 1]^ρ_c[1]
+        inner_b[i, 1] = δ_cb[1] * θ1[i, 1]^ρ_b[1] + δ_bb[1] * θ1[i, 2]^ρ_b[1] + δ_Ib[1] * I[i, 1]^ρ_b[1]
+        y_c[i, 1] = log(A_c[i, 1]) + (1 / ρ_c[1]) * log(inner_c[i, 1])
+        y_b[i, 1] = log(A_b[i, 1]) + (1 / ρ_b[1]) * log(inner_b[i, 1]) 
+    end
+
+    # t = 2
+
+    for i in 1:n
+        I[i, 2] = data[i, Symbol("investment", 2)]
+        inner_c[i, 2] = δ_cc[2] * θ2[i, 1]^ρ_c[2] + δ_bc[2] * θ2[i, 2]^ρ_c[2] + δ_Ic[2] * I[i, 2]^ρ_c[2]
+        inner_b[i, 2] = δ_cb[2] * θ2[i, 1]^ρ_b[2] + δ_bb[2] * θ2[i, 2]^ρ_b[2] + δ_Ib[2] * I[i, 2]^ρ_b[2]
+        y_c[i, 2] = log(A_c[i, 2]) + (1 / ρ_c[2]) * log(inner_c[i, 2])
+        y_b[i, 2] = log(A_b[i, 2]) + (1 / ρ_b[2]) * log(inner_b[i, 2]) 
+    end
+
+    return y_c, y_b # n X (T - 1) Array
 end
 
 # Define the objective function for optimization
-(*function objective()
-    y_hat = nested_ces()
-    return sum((y .- y_hat).^2)
+function objective(factors1, factors2, factors3, params, data::DataFrame)
+
+    yhat_c, yhat_b = nested_ces(factors1, factors2, params, data) # n X (T - 1) Array
+
+    y_2 = draw_theta(factors2, data) # n X K Array
+    y_3 = draw_theta(factors3, data) # n X K Array
+
+    nls_c2 = sum((y_2[:, 1] - yhat_c[:, 1])^2) # \sum_{i = 1}^n (θ_{i, 2}^c - \hat{θ_{i, 2}^c})^2
+    nls_c3 = sum((y_3[:, 1] - yhat_c[:, 2])^2) # \sum_{i = 1}^n (θ_{i, 3}^c - \hat{θ_{i, 3}^c})^2
+    nls_b2 = sum((y_2[:, 2] - yhat_b[:, 1])^2) # \sum_{i = 1}^n (θ_{i, 2}^b - \hat{θ_{i, 2}^b})^2
+    nls_b3 = sum((y_3[:, 2] - yhat_b[:, 2])^2) # \sum_{i = 1}^n (θ_{i, 3}^b - \hat{θ_{i, 3}^b})^2
+
+    return nls_c2, nls_c3, nls_b2, nls_b3
 end
 
 # Perform nonlinear least sqaures estimation
-result_fin_f = optimize(params -> objective(), initial_params)
+result_fin_f = optimize(params -> objective(factors1, factors2, factors3, params, data), initial_params)
