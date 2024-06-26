@@ -1,0 +1,140 @@
+
+******** Make a Panel **********
+
+cd "/Users/clairekim/Desktop/Project/Child Development/STATA"
+
+***** Rearrange to make a panel *****
+
+use merge, clear
+
+* Gender Role Redefination
+
+local varlist girlrolea1994 girlroleb1994 girlrolec1994 girlroled1994 girlrolee1994 girlrolef1994 girlrolea1996 girlroleb1996 girlrolec1996 girlroled1996 girlrolee1996 girlrolef1996 girlrolea1998 girlroleb1998 girlrolec1998 girlroled1998 girlrolee1998 girlrolef1998 girlrolea2000 girlroleb2000 girlrolec2000 girlroled2000 girlrolee2000 girlrolef2000 girlrolea2002 girlroleb2002 girlrolec2002 girlroled2002 girlrolee2002 girlrolef2002 girlrolea2004 girlroleb2004 girlrolec2004 girlroled2004 girlrolee2004 girlrolef2006 girlrolea2006 girlroleb2006 girlrolec2006 girlroled2006 girlrolee2006 girlrolef2006 girlrolea2008 girlroleb2008 girlrolec2008 girlroled2008 girlrolee2008 girlrolef2008 girlrolea2010 girlroleb2010 girlrolec2010 girlroled2010 girlrolee2010 girlrolef2010 girlrolea2012 girlroleb2012 girlrolec2012 girlroled2012 girlrolee2012 girlrolef2012 girlrolea2014 girlroleb2014 girlrolec2014 girlroled2014 girlrolee2014 girlrolef2014
+
+// Loop over each variable in the varlist
+foreach var of local varlist {
+    * Generate a helper variable to track non-missing values for the current variable
+	replace `var' = . if `var' == 6
+}
+
+local varlist girlroleb1994 girlrolec1994 girlrolee1994 girlroleb1996 girlrolec1996 girlrolee1996 girlroleb1998 girlrolec1998 girlrolee1998 girlroleb2000 girlrolec2000 girlrolee2000 girlroleb2002 girlrolec2002 girlrolee2002 girlroleb2004 girlrolec2004 girlrolee2004 girlroleb2006 girlrolec2006 girlrolee2006 girlroleb2008 girlrolec2008 girlrolee2008 girlroleb2010 girlrolec2010 girlrolee2010 girlroleb2012 girlrolec2012 girlrolee2012 girlroleb2014 girlrolec2014 girlrolee2014
+
+// Loop over each variable in the varlist
+foreach var of local varlist {
+    * Generate a helper variable to track non-missing values for the current variable
+	replace `var' = 5 - `var' if `var' != .
+}
+
+*drop AGEINT94_1994 YASEX_XRND AGEINT96_1996 AGEINT98_1998 AGEINT2000_2000 LASTINTYR_XRND AGE1B_XRND AGEINT2002_2002 AGEINT2004_2004 AGEINT2006_2006 VERSION_R29_XRND AGEINT2008_2008 AGEINT2010_2010 AGEINT2012_2012 AGEINT2014_2014 AGEINT2016_2016 SAMPLE_ID_1979
+
+reshape long girlrolea girlroleb girlrolec girlroled girlrolee girlrolef mathraw mathpercent mathstandard readraw readpercent readstandard compraw comppercent compstandard age comlearn computera computerc computerd computerb book momhelp helpgrade helphw medu mincome fincome mchildsup mage urban numkid mfirstbirth, i(id_child) j(year)
+
+sort id_child age
+
+***** Replace "AGE" into years *****
+
+generate agey = 0 if inrange(age, 0, 11)
+replace agey = 1 if inrange(age, 12, 23)
+replace agey = 2 if inrange(age, 24, 35)
+replace agey = 3 if inrange(age, 36, 47)
+replace agey = 4 if inrange(age, 48, 59)
+replace agey = 5 if inrange(age, 60, 71)
+replace agey = 6 if inrange(age, 72, 83)
+replace agey = 7 if inrange(age, 84, 95)
+replace agey = 8 if inrange(age, 96, 107)
+replace agey = 9 if inrange(age, 108, 119)
+replace agey = 10 if inrange(age, 120, 131)
+replace agey = 11 if inrange(age, 132, 143)
+replace agey = 12 if inrange(age, 144, 155)
+replace agey = 13 if inrange(age, 156, 167)
+replace agey = 14 if inrange(age, 168, 179)
+replace agey = 15 if inrange(age, 180, 191)
+
+drop if agey == .
+
+drop if agey < 10 | agey > 14
+
+save "/Users/clairekim/Desktop/Project/Child Development/STATA/panel.dta", replace
+
+***********************
+* Summary Satatistics *
+***********************
+
+* Demographics
+gen female = sex==2 // Create a female indicator
+gen black = race==2 // Black indicator
+gen hisp = race==1 // hispanic indicator
+gen numsib = numkid - 1 // number of siblings
+replace urban = . if urban == 2
+
+gen compparent = 1 if comlearn == 3
+replace compparent = 0 if inrange(comlearn, 1, 2) | inrange(comlearn, 4, 6) | comlearn == 0
+
+* Mom Characteristics
+gen myear1stbirth = year - mage + mfirstbirth
+gen firstchild = 1 if myear1stbirth == byear
+replace firstchild = 0 if myear1stbirth < byear // Create first child indicator
+
+gen famincome = mincome + fincome if mincome > 0 & fincome > 0 & mincome ~=. & fincome ~=.
+replace famincome = mincome if famincome == . & mincome > 0 & mincome ~=. & fincome == 0
+replace famincome = fincome if famincome == . & fincome > 0 & fincome ~=. & mincome == 0 // create family income
+
+replace medu =. if medu == 95
+
+*CPI-adjusted income using 1983 as the index (1983 = 100)
+gen cpi = 148.2 if year == 1994
+replace cpi = 156.9 if year == 1996
+replace cpi = 163.0 if year == 1998
+replace cpi = 172.2 if year == 2000
+replace cpi = 179.9 if year == 2002
+replace cpi = 188.9 if year == 2004
+replace cpi = 201.6 if year == 2006
+replace cpi = 215.3 if year == 2008
+replace cpi = 218.1 if year == 2010
+replace cpi = 229.6 if year == 2012
+replace cpi = 236.7 if year == 2014
+
+gen inccpi = famincome * 100 / cpi
+
+save "/Users/clairekim/Desktop/Project/Child Development/STATA/empirics.dta", replace
+
+* Descriptive Statistics
+
+use empirics, clear
+
+* Baseline
+sum female black urban numsib firstchild medu mage inccpi if !missing(medu, inccpi, firstchild, urban)
+sum black urban numsib firstchild medu mage inccpi if female == 1 & !missing(medu, inccpi, firstchild, urban)
+sum black urban numsib firstchild medu mage inccpi if female == 0 & !missing(medu, inccpi, firstchild, urban)
+
+* Average cognitions and gender role expectations per age
+egen math_f = mean(mathstandard) if female == 1, by(agey)
+egen math_m = mean(mathstandard) if female == 0, by(agey)
+line math_f math_m agey if !missing(medu, inccpi, firstchild, urban), sort ytitle("PIAT Math Score") legend(label(1 "Females") label(2 "Males")) xtitle("Age")
+graph export "/Users/clairekim/Desktop/Project/Child Development/STATA/Figures/piatmath.png", replace as(png) name("Graph")
+
+egen read_f = mean(readstandard) if female == 1, by(agey)
+egen read_m = mean(readstandard) if female == 0, by(agey)
+line read_f read_m agey if !missing(medu, inccpi, firstchild, urban), sort ytitle("PIAT Reading Recognition Score") legend(label(1 "Females") label(2 "Males")) xtitle("Age")
+graph export "/Users/clairekim/Desktop/Project/Child Development/STATA/Figures/piatread.png", replace as(png) name("Graph")
+
+egen comp_f = mean(compstandard) if female == 1, by(agey)
+egen comp_m = mean(compstandard) if female == 0, by(agey)
+line comp_f comp_m agey if !missing(medu, inccpi, firstchild, urban), sort ytitle("PIAT Reading Comprehension Score") legend(label(1 "Females") label(2 "Males")) xtitle("Age")
+graph export "/Users/clairekim/Desktop/Project/Child Development/STATA/Figures/piatcomp.png", replace as(png) name("Graph")
+
+egen bias_f = mean(girlrolee) if female == 1 & inrange(girlrolee, 1, 4), by(agey)
+egen bias_m = mean(girlrolee) if female == 0 & inrange(girlrolee, 1, 4), by(agey)
+line bias_f bias_m agey if !missing(medu, inccpi, firstchild, urban), sort ytitle("Gender Role Expectation") legend(label(1 "Females") label(2 "Males")) xtitle("Age")
+graph export "/Users/clairekim/Desktop/Project/Child Development/STATA/Figures/genderrole.png", replace as(png) name("Graph")
+
+egen book_f = mean(book) if female == 1, by(agey)
+egen book_m = mean(book) if female == 0, by(agey)
+line book_f book_m agey if !missing(medu, inccpi, firstchild, urban), sort ytitle("The number of books") legend(label(1 "Females") label(2 "Males")) xtitle("Age")
+graph export "/Users/clairekim/Desktop/Project/Child Development/STATA/Figures/book.png", replace as(png) name("Graph")
+
+egen hw_f = mean(helphw) if female == 1, by(agey)
+egen hw_m = mean(helphw) if female == 0, by(agey)
+line hw_f hw_m agey if !missing(medu, inccpi, firstchild, urban), sort ytitle("How often homework helped from mother") legend(label(1 "Females") label(2 "Males")) xtitle("Age")
+graph export "/Users/clairekim/Desktop/Project/Child Development/STATA/Figures/helphw.png", replace as(png) name("Graph")
+
