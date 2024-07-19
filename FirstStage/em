@@ -3,10 +3,16 @@ using Optim, LinearAlgebra, Statistics, Distributions, CSV, DataFrames, Random
 #println("Before changing directory")
 cd("/Users/clairekim/Desktop/Project/Child Development/julia")
 
+function normpdf(μ, σ, x)
+    pdf = (1 / sqrt(2 * pi * σ^2)) * exp(-(x - μ)^2 / (2 * σ^2))
+
+    return pdf
+end
+
 function generate_invertible_matrix()
-    A = rand(2, 2)  # Generate a 2x2 matrix with random elements between 0 and 1
+    A = randn(6, 6)  # Generate a 2x2 matrix with random elements between 0 and 1
     while det(A) ≈ 0.0  # Check if the determinant is approximately zero
-        A = rand(2, 2)  # If the matrix is singular, generate a new random matrix
+        A = randn(6, 6)  # If the matrix is singular, generate a new random matrix
     end
     return A
 end
@@ -50,51 +56,75 @@ function ensure_positive_definite!(Δ::AbstractMatrix; tol::Float64=1e-6)
     end
 end
 
-function draw_samples_positive(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data::DataFrame)
+function draw_samples_positive_fast(k1, Δ1, k2, Δ2, κ, R, data::DataFrame)
     println("Inside factor draw")
-    n = length(unique(data.pid))  # Number of individuals
-    K = 2 # Number of latent factors
+    n = size(data, 1)  # Number of individuals
+    K = 6 # Number of latent factors
     θ_samples = zeros(Float64, n, R, K)  # a 2-dimensional array (or matrix) of size (n X R X K) filled with zeros
     
-    # Cholesky decompositions of the covariance matrices
-    L1 = cholesky(Δ1).L
-    L2 = cholesky(Δ2).L
-    L3 = cholesky(Δ3).L
-    L4 = cholesky(Δ4).L
+    # Create MvNormal distributions with given means and covariances
+    mvn1 = MvNormal(k1, Δ1)
+    mvn2 = MvNormal(k2, Δ2)
+    #mvn3 = MvNormal(k3, Δ3)
+    #mvn4 = MvNormal(k4, Δ4)
 
     for i in 1:n
         for r in 1:R
-
             # Draw a random sample from a Bernoulli distribution with probability κ
             u = rand()
             if u < κ[1]
-                z = randn(length(k1))
-                θ_samples[i, r, :] = k1 + L1*z
+                θ_samples[i, r, :] = rand(mvn1)
             elseif u < κ[1] + κ[2]
-                z = randn(length(k2))
-                θ_samples[i, r, :] = k2 + L2*z
-            elseif u < κ[1] + κ[2] + κ[3]
-                z = randn(length(k3))
-                θ_samples[i, r, :] = k3 + L3*z
-            else
-                z = randn(length(k4))
-                θ_samples[i, r, :] = k4 + L4*z
-            end         
+                θ_samples[i, r, :] = rand(mvn2)
+            #elseif u < κ[1] + κ[2] + κ[3]
+            #    θ_samples[i, r, :] = rand(mvn3)
+            #else
+            #    θ_samples[i, r, :] = rand(mvn4)
+            end
         end
     end
 
-    return θ_samples # n X R X K Array
+    return θ_samples # θ_{i, 1]^c, θ_{i, 1}^b, θ_{i, 2]^c, θ_{i, 2}^b, θ_{i, 3]^c, θ_{i, 3}^b
 end
 
-# Function to compute the likelihood of observed z given theta for continuous measures
+function draw_samples_positive_one(k1, Δ1, k2, Δ2, κ, data::DataFrame)
+    println("Inside factor draw")
+    n = size(data, 1)  # Number of individuals
+    K = 6 # Number of latent factors
+    θ_samples = zeros(Float64, n, K)  # a 2-dimensional array (or matrix) of size (n X R X K) filled with zeros
+    
+    # Create MvNormal distributions with given means and covariances
+    mvn1 = MvNormal(k1, Δ1)
+    mvn2 = MvNormal(k2, Δ2)
+    #mvn3 = MvNormal(k3, Δ3)
+    #mvn4 = MvNormal(k4, Δ4)
+
+    for i in 1:n
+        u = rand()
+        if u < κ[1]
+            θ_samples[i, :] = rand(mvn1)
+        elseif u < κ[1] + κ[2]
+            θ_samples[i, :] = rand(mvn2)
+        #elseif u < κ[1] + κ[2] + κ[3]
+        #    θ_samples[i, r, :] = rand(mvn3)
+        #else
+        #    θ_samples[i, r, :] = rand(mvn4)
+        end
+    end
+
+    return θ_samples # n X 6 Array
+end
+
+ # Function to compute the likelihood of observed z given theta for continuous measures
 function likelihood_cont(μ, α, σ, θ, R, data::DataFrame)
     println("Inside likelihood_cont")
     #println("Inside likelihood_cont")
     n = length(unique(data.pid))  # Number of individuals
-    J = 3  # Number of continuous measurements
+    J = 9  # Number of continuous measurements
 
     #Initialize likelihood
     likelihoods = zeros(Float64, n, R) # n X R Matrix
+    offsets = [1, 2, 3]
 
     # Precompute the valid indices
     #valid_indices = [data[i, Symbol("meas", j)] != -999 for i in 1:n, j in 1:J]
@@ -103,49 +133,50 @@ function likelihood_cont(μ, α, σ, θ, R, data::DataFrame)
         for r in 1:R
             p_cont_product = 1.0
             for j in 1:J
-                #if valid_indices[i, j]
-                #μ[indices_to_zero_μ] .= 0
-                #λ[indices_to_one_λ] .= 1
-                prob = pdf(Normal(μ[j] + α[j] * θ[i, r, 1], abs(σ[j])), data[i, Symbol("meas", j)])         
-                p_cont_product *= prob # \prod_{j = 1}^J Pr(z_{i, j} | θ_i) 
+                col_offset = offsets[div(j - 1, 3) + 1]
+                meas_col = Symbol("meas", j)
+                prob = pdf(Normal(μ[j] + α[j] * θ[i, r, col_offset], σ[j]), data[i, meas_col])
+                p_cont_product *= prob
             end
             likelihoods[i, r] = p_cont_product
         end
     end
-    return likelihoods # n X 2 matrix
+    return likelihoods # n X R matrix
 end
 
 # Function to compute the likelihood of observed z given theta for discrete measures
 function likelihood_cens(μ, α, σ, θ, R, data::DataFrame)
     println("Inside likelihood_cens")
-    #println("Inside likelihood_cens")
+    
     n = length(unique(data.pid))  # Number of individuals
-    J = 4  # Number of censored measurements
+    J = 12  # Number of censored measurements
 
-    #Initialize likelihood
+    # Initialize likelihood
     likelihoods = zeros(Float64, n, R)
     μ_j_theta = zeros(Float64, J)
-
-    # Precompute the valid indices
-    #valid_indices = [data[i, Symbol("meas", j + 3)] != -999 for i in 1:n, j in 1:J] # n X 32 Array
+    
+    # Precompute measurement symbols and column offsets
+    meas_symbols = [Symbol("meas", j + 9) for j in 1:J]
+    offsets = [4, 5, 6]
 
     for i in 1:n
         for r in 1:R
             p_cens_product = 1.0
             for j in 1:J
-                #if valid_indices[i, j]                
-                #μ[indices_to_zero_μ] .= 0
-                #λ[indices_to_one_λ] .= 1
-                μ_j_theta[j] = μ[j + 3] + (α[j + 3] * θ[i, r, 2])
-                if data[i, Symbol("meas", j + 3)] == 1
-                    p_cens = cdf(Normal(μ_j_theta[j], abs(σ[j + 3])), 2)
-                elseif data[i, Symbol("meas", j + 3)] == 4
-                    p_cens = 1.0 - cdf(Normal(μ_j_theta[j], abs(σ[j + 3])), 4)
-                elseif data[i, Symbol("meas", j + 3)] == 2
-                    p_cens = cdf(Normal(μ_j_theta[j], abs(σ[j + 3])), 3) - cdf(Normal(μ_j_theta[j], abs(σ[j + 3])), 2)
-                elseif data[i, Symbol("meas", j + 3)] == 3
-                    p_cens = cdf(Normal(μ_j_theta[j], abs(σ[j + 3])), 4) - cdf(Normal(μ_j_theta[j], abs(σ[j + 3])), 3)
+                col_offset = offsets[div(j - 1, 4) + 1]
+                μ_j_theta[j] = μ[j + 9] + (α[j + 9] * θ[i, r, col_offset])
+                
+                meas_value = data[i, meas_symbols[j]]
+                if meas_value == 1
+                    p_cens = cdf(Normal(μ_j_theta[j], abs(σ[j + 9])), 2)
+                elseif meas_value == 4
+                    p_cens = 1.0 - cdf(Normal(μ_j_theta[j], abs(σ[j + 9])), 4)
+                elseif meas_value == 2
+                    p_cens = cdf(Normal(μ_j_theta[j], abs(σ[j + 9])), 3) - cdf(Normal(μ_j_theta[j], abs(σ[j + 9])), 2)
+                elseif meas_value == 3
+                    p_cens = cdf(Normal(μ_j_theta[j], abs(σ[j + 9])), 4) - cdf(Normal(μ_j_theta[j], abs(σ[j + 9])), 3)
                 end
+                
                 p_cens_product *= p_cens
             end
             likelihoods[i, r] = p_cens_product
@@ -155,10 +186,11 @@ function likelihood_cens(μ, α, σ, θ, R, data::DataFrame)
 end
 
 # Expectation step: Compute probabilities for each observation
-function expectation_step_n(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, θ, R, data::DataFrame)
+function expectation_step_n(k1, Δ1, k2, Δ2, κ, θ, R, data::DataFrame)
     n = length(unique(data.pid))  # Number of observations
 
-    posterior = zeros(Float64, n, R, 4)
+    #posterior = zeros(Float64, n, R, 4)
+    posterior = zeros(Float64, n, R, 2)
 
     # Compute likelihoods for continuous and censored measurements
     cont = likelihood_cont(μ, α, σ, θ, R, data) # n X R array
@@ -188,16 +220,23 @@ function expectation_step_n(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, θ, R, data:
         for r in 1:R
             num1 = κ[1] * pdf(MvNormal(k1, Δ1), θ[i, r, :])
             num2 = κ[2] * pdf(MvNormal(k2, Δ2), θ[i, r, :])
-            num3 = κ[3] * pdf(MvNormal(k3, Δ3), θ[i, r, :])
-            num4 = κ[4] * pdf(MvNormal(k4, Δ4), θ[i, r, :])
-            den = num1 + num2 + num3 + num4
+            #num3 = κ[3] * pdf(MvNormal(k3, Δ3), θ[i, r, :])
+            #num4 = κ[4] * pdf(MvNormal(k4, Δ4), θ[i, r, :])
+            #den = num1 + num2 + num3 + num4
+            den = num1 + num2
 
             if den != 0
                 posterior[i, r, 1] = weight[i, r] * (num1 / den)
                 posterior[i, r, 2] = weight[i, r] * (num2 / den)
-                posterior[i, r, 3] = weight[i, r] * (num3 / den)
-                posterior[i, r, 4] = weight[i, r] * (num4 / den)
+                #posterior[i, r, 3] = weight[i, r] * (num3 / den)
+                #posterior[i, r, 4] = weight[i, r] * (num4 / den)
             end
+
+            # Debugging: Print intermediate values
+            #println("i: $i, r: $r")
+            #println("num1: $num1, num2: $num2, num3: $num3, num4: $num4, den: $den")
+            #println("weight[i, r]: $(weight[i, r])")
+            #println("posterior[i, r, 1]: $(posterior[i, r, 1]), posterior[i, r, 2]: $(posterior[i, r, 2]), posterior[i, r, 3]: $(posterior[i, r, 3]), posterior[i, r, 4]: $(posterior[i, r, 4])")
         end
     end
 
@@ -207,14 +246,15 @@ end
 # M-step: Update the parameters
 function m_step(posterior, θ, R, data::DataFrame)
     n = length(unique(data.pid))
-    K = 2 # the number of elements in θ
+    K = 6 # the number of elements in θ
 
     # Initialize
     κ_num1 = 0.0
     κ_num2 = 0.0
-    κ_num3 = 0.0
-    κ_num4 = 0.0
-    κ_new = zeros(Float64, 4)
+    #κ_num3 = 0.0
+    #κ_num4 = 0.0
+    #κ_new = zeros(Float64, 4)
+    κ_new = zeros(Float64, 2)
     k1_num = zeros(Float64, K)
     k1_new = zeros(Float64, K)
     Δ1_num = zeros(Float64, K, K)
@@ -223,14 +263,14 @@ function m_step(posterior, θ, R, data::DataFrame)
     k2_new = zeros(Float64, K)
     Δ2_num = zeros(Float64, K, K)
     Δ2_new = zeros(Float64, K, K)
-    k3_num = zeros(Float64, K)
-    k3_new = zeros(Float64, K)
-    Δ3_num = zeros(Float64, K, K)
-    Δ3_new = zeros(Float64, K, K)
-    k4_num = zeros(Float64, K)
-    k4_new = zeros(Float64, K)
-    Δ4_num = zeros(Float64, K, K)
-    Δ4_new = zeros(Float64, K, K)
+    #k3_num = zeros(Float64, K)
+    #k3_new = zeros(Float64, K)
+    #Δ3_num = zeros(Float64, K, K)
+    #Δ3_new = zeros(Float64, K, K)
+    #k4_num = zeros(Float64, K)
+    #k4_new = zeros(Float64, K)
+    #Δ4_num = zeros(Float64, K, K)
+    #Δ4_new = zeros(Float64, K, K)
     
     # Update parameters
     # (1) κ
@@ -238,15 +278,15 @@ function m_step(posterior, θ, R, data::DataFrame)
         for r in 1:R
             κ_num1 += posterior[i, r, 1]
             κ_num2 += posterior[i, r, 2]
-            κ_num3 += posterior[i, r, 3]
-            κ_num4 += posterior[i, r, 4]
+            #κ_num3 += posterior[i, r, 3]
+            #κ_num4 += posterior[i, r, 4]
         end
     end
 
     κ_new[1] = κ_num1 / n
     κ_new[2] = κ_num2 / n
-    κ_new[3] = κ_num3 / n
-    κ_new[4] = κ_num4 / n
+    #κ_new[3] = κ_num3 / n
+    #κ_new[4] = κ_num4 / n
 
     # Normalize κ to ensure elements are between 0 and 1 and their sum equals 1
     κ_sum = sum(κ_new)
@@ -268,13 +308,13 @@ function m_step(posterior, θ, R, data::DataFrame)
     for i in 1:n
         for r in 1:R
             #Δ1_num += posterior[i, r, 1] .* ((θ[i, r, :] - k1_new) * transpose(θ[i, r, :] - k1_new))
-            Δ1_num += posterior[i, r, 1] .* (θ[i, r, :] * transpose(θ[i, r, :]))
+            Δ1_num += posterior[i, r, 1] .* (θ[i, r, :] * (θ[i, r, :])')
         end
     end
 
     if κ_num1 != 0
         #Δ1_new = Δ1_num ./ κ_num1
-        Δ1_new = Δ1_num ./ κ_num1 - (k1_new * transpose(k1_new))
+        Δ1_new = Δ1_num ./ κ_num1 - (k1_new * (k1_new)')
     end
 
     if is_not_positive_definite(Δ1_new)
@@ -295,13 +335,13 @@ function m_step(posterior, θ, R, data::DataFrame)
     for i in 1:n
         for r in 1:R
             #Δ2_num += posterior[i, r, 2] .* ((θ[i, r, :] - k2_new) * transpose(θ[i, r, :] - k2_new))
-            Δ2_num += posterior[i, r, 2] .* (θ[i, r, :] * transpose(θ[i, r, :]))
+            Δ2_num += posterior[i, r, 2] .* (θ[i, r, :] * (θ[i, r, :])')
         end
     end
 
     if κ_num2 != 0
         #Δ2_new = Δ2_num ./ κ_num2
-        Δ2_new = Δ2_num ./ κ_num2 - (k2_new * transpose(k2_new))
+        Δ2_new = Δ2_num ./ κ_num2 - (k2_new * (k2_new)')
     end
 
     if is_not_positive_definite(Δ2_new)
@@ -309,114 +349,194 @@ function m_step(posterior, θ, R, data::DataFrame)
     end
 
     # (4) k3, Δ3
-    for i in 1:n
-        for r in 1:R
-            k3_num += posterior[i, r, 3] .* θ[i, r, :]
-        end
-    end
+    #for i in 1:n
+    #    for r in 1:R
+    #        k3_num += posterior[i, r, 3] .* θ[i, r, :]
+    #    end
+    #end
 
-    if κ_num3 != 0
-        k3_new = k3_num ./ κ_num3
-    end
+    #if κ_num3 != 0
+    #    k3_new = k3_num ./ κ_num3
+    #end
 
-    for i in 1:n
-        for r in 1:R
-            #Δ3_num += posterior[i, r, 3] .* ((θ[i, r, :] - k3_new) * transpose(θ[i, r, :] - k3_new))
-            Δ3_num += posterior[i, r, 3] .* (θ[i, r, :] * transpose(θ[i, r, :]))
-        end
-    end
+    #for i in 1:n
+    #    for r in 1:R
+    #        #Δ3_num += posterior[i, r, 3] .* ((θ[i, r, :] - k3_new) * transpose(θ[i, r, :] - k3_new))
+    #        Δ3_num += posterior[i, r, 3] .* (θ[i, r, :] * transpose(θ[i, r, :]))
+    #    end
+    #end
 
-    if κ_num3 != 0
-        #Δ3_new = Δ3_num ./ κ_num3
-        Δ3_new = Δ3_num ./ κ_num3 - (k3_new * transpose(k3_new))
-    end
+    #if κ_num3 != 0
+    #    #Δ3_new = Δ3_num ./ κ_num3
+    #    Δ3_new = Δ3_num ./ κ_num3 - (k3_new * transpose(k3_new))
+    #end
 
-    if is_not_positive_definite(Δ3_new)
-        ensure_positive_definite!(Δ3_new)
-    end
+    #if is_not_positive_definite(Δ3_new)
+    #    ensure_positive_definite!(Δ3_new)
+    #end
 
     # (5) k4, Δ4
-    for i in 1:n
-        for r in 1:R
-            k4_num += posterior[i, r, 4] .* θ[i, r, :]
-        end
-    end
-
-    if κ_num4 != 0
-        k4_new = k4_num ./ κ_num4
-    end
-
-    for i in 1:n
-        for r in 1:R
-            #Δ4_num += posterior[i, r, 4] .* ((θ[i, r, :] - k4_new) * transpose(θ[i, r, :] - k4_new))
-            Δ4_num += posterior[i, r, 4] .* (θ[i, r, :] * transpose(θ[i, r, :]))
-        end
-    end
-
-    if κ_num4 != 0
-        #Δ4_new = Δ4_num ./ κ_num4
-        Δ4_new = Δ4_num ./ κ_num4 - (k4_new * transpose(k4_new))
-    end
-
-    if is_not_positive_definite(Δ4_new)
-        ensure_positive_definite!(Δ4_new)
-    end
-
-    #for (var, var_name) in zip([k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new], ["k1_new", "k2_new", "k3_new", "k4_new", "Δ1_new", "Δ2_new", "Δ3_new", "Δ4_new", "κ_new"])
-    #    if any(isnan.(var))
-    #        println("Warning: $var_name contains NaN values.")
-    #    else
-    #        println("No NaN values found in $var_name.")
+    #for i in 1:n
+    #    for r in 1:R
+    #        k4_num += posterior[i, r, 4] .* θ[i, r, :]
     #    end
-    #end 
+    #end
 
-    return k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new
+    #if κ_num4 != 0
+    #    k4_new = k4_num ./ κ_num4
+    #end
+
+    #for i in 1:n
+    #    for r in 1:R
+    #        #Δ4_num += posterior[i, r, 4] .* ((θ[i, r, :] - k4_new) * transpose(θ[i, r, :] - k4_new))
+    #        Δ4_num += posterior[i, r, 4] .* (θ[i, r, :] * transpose(θ[i, r, :]))
+    #    end
+    #end
+
+    #if κ_num4 != 0
+    #    #Δ4_new = Δ4_num ./ κ_num4
+    #    Δ4_new = Δ4_num ./ κ_num4 - (k4_new * transpose(k4_new))
+    #end
+
+    #if is_not_positive_definite(Δ4_new)
+    #    ensure_positive_definite!(Δ4_new)
+    #end
+
+    #return k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new
+    return k1_new, k2_new, Δ1_new, Δ2_new, κ_new
+end
+
+function update(θ, μ, α, σ, data::DataFrame)
+    n = length(unique(data.pid))
+    
+    # Update α, μ, and σ in a single loop
+    
+    # (1) Censored
+    for j in 10:21
+        if 10 ≤ j ≤ 13
+            θ_index = 4
+        elseif 14 ≤ j ≤ 17
+            θ_index = 5
+        elseif 18 ≤ j ≤ 21
+            θ_index = 6
+        end
+        
+        # Sample moments
+        mean_y = mean(data[:, Symbol("meas", j)])
+        mean_θ = mean(θ[:, θ_index])
+        cov = 0.0
+        var_θ = 0.0
+        var_y = 0.0
+        for i in 1:n
+            cov += (data[i, Symbol("meas", j)] - mean_y) * (θ[i, θ_index] - mean_θ)
+            var_θ += (θ[i, θ_index] - mean_θ)^2
+            var_y += (data[i, Symbol("meas", j)] - mean_y)^2
+        end
+        α[j] = cov / var_θ
+        μ[j] = mean_y - α[j] * mean_θ
+        σ[j] = sqrt(var_y - cov * α[j])
+        
+    end
+
+    # (2) Continuous Measures
+    for j in 1:9
+        if 1 ≤ j ≤ 3
+            θ_index = 1
+        elseif 4 ≤ j ≤ 6
+            θ_index = 2
+        elseif 7 ≤ j ≤ 9
+            θ_index = 3
+        end
+
+        s_xx = 0.0
+        s_xy = 0.0
+        mean_y = 0.0
+        mean_θ = 0.0
+        for i in 1:n
+            mean_y += data[i, Symbol("meas", j)] / n
+            mean_θ += θ[i, θ_index] / n
+            s_xx += (θ[i, θ_index] - mean_θ)^2 / n
+            s_xy += (data[i, Symbol("meas", j)] - mean_y) * (θ[i, θ_index] - mean_θ) / n
+        end
+
+        α[j] = s_xy / s_xx
+        μ[j] = mean_y - α[j] * mean_θ
+
+        u = 0.0
+        for i in 1:n
+            u += (data[i, Symbol("meas", j)] - μ[j] - α[j] * θ[i, θ_index])^2 / n
+        end
+        σ[j] = sqrt(u)
+        
+        #α[j] = R * (sum(data[:, Symbol("meas", j)]) * sum(θ[:, :, θ_index]) - 
+        #            n * sum(sum(data[i, Symbol("meas", j)] * θ[i, r, θ_index] for r in 1:R) for i in 1:n)) / 
+        #            (sum(θ[:, :, θ_index])^2 - n * R * sum(sum(θ[i, r, θ_index]^2 for r in 1:R) for i in 1:n))
+        
+        #μ[j] = (R * sum(data[:, Symbol("meas", j)]) - α[j] * sum(θ[:, :, θ_index])) / (n * R)
+        
+        #σ[j] = sqrt(var(data[:, Symbol("meas", j)]) - α[j]^2 * var(θ[:, :, θ_index]))
+    end
+
+    # Set specific indices of α and μ
+    α[[1, 4, 7, 10, 14, 18]] .= 1.0
+    μ[[1, 4, 7, 10, 14, 18]] .= 0.0
+
+    return μ, α, σ
 end
 
 # EM algorithm
-function em_algorithm(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data::DataFrame; max_iters)
+function em_algorithm(k1, Δ1, k2, Δ2, κ, μ, α, σ, R, data::DataFrame; max_iters)
     
     for iter in 1:max_iters
         # Draw latent factors
-        θ = draw_samples_positive(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data) ## n by R by 2 array
-
+        θ = draw_samples_positive_fast(k1, Δ1, k2, Δ2, κ, R, data) ## n by R by 2 array
+        
         # E-step
         println("Starting E-step iteration $iter")
-        posterior = expectation_step_n(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, θ, R, data)
+        posterior = expectation_step_n(k1, Δ1, k2, Δ2, κ, θ, R, data)
         println("Completed E-step iteration $iter")
         
         # M-step
         println("Starting M-step iteration $iter")
-        k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new = m_step(posterior, θ, R, data)
+        k1_new, k2_new, Δ1_new, Δ2_new, κ_new = m_step(posterior, θ, R, data)
         println("Completed M-step iteration $iter")
         
         # Check convergence
         κ_change = norm(κ_new - κ) / max(norm(κ), 1e-6)
         k1_change = norm(k1_new - k1) / max(norm(k1), 1e-6)
         k2_change = norm(k2_new - k2) / max(norm(k2), 1e-6)
-        k3_change = norm(k3_new - k3) / max(norm(k3), 1e-6)
-        k4_change = norm(k4_new - k4) / max(norm(k4), 1e-6)
+        #k3_change = norm(k3_new - k3) / max(norm(k3), 1e-6)
+        #k4_change = norm(k4_new - k4) / max(norm(k4), 1e-6)
         Δ1_change = norm(Δ1_new - Δ1) / max(norm(Δ1), 1e-6)
         Δ2_change = norm(Δ2_new - Δ2) / max(norm(Δ2), 1e-6)
-        Δ3_change = norm(Δ3_new - Δ3) / max(norm(Δ3), 1e-6)
-        Δ4_change = norm(Δ4_new - Δ4) / max(norm(Δ4), 1e-6)
+        #Δ3_change = norm(Δ3_new - Δ3) / max(norm(Δ3), 1e-6)
+        #Δ4_change = norm(Δ4_new - Δ4) / max(norm(Δ4), 1e-6)
         
         # Check if all changes are below the convergence threshold
-        if κ_change < 0.001 && k1_change < 0.001 && k2_change < 0.001 && k3_change < 0.001 && k4_change < 0.001 && Δ1_change < 0.001 && Δ2_change < 0.001 && Δ3_change < 0.001 && Δ4_change < 0.001
+        if κ_change < 1e-6 && k1_change < 1e-6 && k2_change < 1e-6 Δ1_change < 1e-6 && Δ2_change < 1e-6 #&&
+            #k3_change < 0.001 && k4_change < 0.001 && Δ3_change < 0.001 && Δ4_change < 0.001
             println("Converged after $iter iterations.")
             break
         end
     
-        k1, k2, k3, k4, Δ1, Δ2, Δ3, Δ4, κ = k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new
+        #k1, k2, k3, k4, Δ1, Δ2, Δ3, Δ4, κ = k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new
+        k1, k2, Δ1, Δ2, κ = k1_new, k2_new, Δ1_new, Δ2_new, κ_new
+
+        θ = draw_samples_positive_one(k1, Δ1, k2, Δ2, κ, data)
+
+        # Update Measurement Parameters
+        μ, α, σ = update(θ, μ, α, σ, data)
     end
-    
-    return k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ
+
+    #return k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ
+    return k1, Δ1, k2, Δ2, κ, μ, α, σ
 end
 
 # Bootstrap EM for parameter estimation and standard errors
-function bootstrap_em(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data, num_bootstraps::Int, max_iters)
+function bootstrap_em(k1, Δ1, k2, Δ2, κ, μ, α, σ, R, data, num_bootstraps::Int, max_iters)
     n = length(unique(data.pid))  # Number of observations
-    num_params = 28    # Number of parameters
+    num_params = 149    # Number of parameters
+    #num_params = 172    # Number of parameters
     bootstrapped_params = zeros(num_params, num_bootstraps)
 
     for b in 1:num_bootstraps
@@ -427,50 +547,58 @@ function bootstrap_em(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data, num_boots
         # EM algorithm on bootstrap sample
         k1_b = copy(k1)
         k2_b = copy(k2)
-        k3_b = copy(k3)
-        k4_b = copy(k4)
+        #k3_b = copy(k3)
+        #k4_b = copy(k4)
         Δ1_b = copy(Δ1)
         Δ2_b = copy(Δ2)
-        Δ3_b = copy(Δ3)
-        Δ4_b = copy(Δ4)
+        #Δ3_b = copy(Δ3)
+        #Δ4_b = copy(Δ4)
         κ_b = copy(κ)
 
         for iter in 1:max_iters
             # Draw latent factors
-            θ = draw_samples_positive(k1_b, Δ1_b, k2_b, Δ2_b, k3_b, Δ3_b, k4_b, Δ4_b, κ_b, R, bootstrap_data) ## Adjust as per your draw_samples function
+            θ = draw_samples_positive_fast(k1_b, Δ1_b, k2_b, Δ2_b, κ_b, R, bootstrap_data) ## Adjust as per your draw_samples function
 
             # E-step
             println("Starting E-step iteration $iter")
-            posterior = expectation_step_n(k1_b, Δ1_b, k2_b, Δ2_b, k3_b, Δ3_b, k4_b, Δ4_b, κ, θ, R, bootstrap_data)
+            posterior = expectation_step_n(k1_b, Δ1_b, k2_b, Δ2_b, κ, θ, R, bootstrap_data)
             println("Completed E-step iteration $iter")
 
             # M-step
             println("Starting M-step iteration $iter")
-            k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new = m_step(posterior, θ, R, bootstrap_data)
+            k1_new, k2_new, Δ1_new, Δ2_new, κ_new = m_step(posterior, θ, R, bootstrap_data)
             println("Completed M-step iteration $iter")
 
             # Check convergence
             κ_change = norm(κ_new - κ_b) / max(norm(κ_b), 1e-6)
             k1_change = norm(k1_new - k1_b) / max(norm(k1_b), 1e-6)
             k2_change = norm(k2_new - k2_b) / max(norm(k2_b), 1e-6)
-            k3_change = norm(k3_new - k3_b) / max(norm(k3_b), 1e-6)
-            k4_change = norm(k4_new - k4_b) / max(norm(k4_b), 1e-6)
+            #k3_change = norm(k3_new - k3_b) / max(norm(k3_b), 1e-6)
+            #k4_change = norm(k4_new - k4_b) / max(norm(k4_b), 1e-6)
             Δ1_change = norm(Δ1_new - Δ1_b) / max(norm(Δ1_b), 1e-6)
             Δ2_change = norm(Δ2_new - Δ2_b) / max(norm(Δ2_b), 1e-6)
-            Δ3_change = norm(Δ3_new - Δ3_b) / max(norm(Δ3_b), 1e-6)
-            Δ4_change = norm(Δ4_new - Δ4_b) / max(norm(Δ4_b), 1e-6)
+            #Δ3_change = norm(Δ3_new - Δ3_b) / max(norm(Δ3_b), 1e-6)
+            #Δ4_change = norm(Δ4_new - Δ4_b) / max(norm(Δ4_b), 1e-6)
 
             # Check if all changes are below the convergence threshold
-            if κ_change < 0.001 && k1_change < 0.001 && k2_change < 0.001 && k3_change < 0.001 && k4_change < 0.001 && Δ1_change < 0.001 && Δ2_change < 0.001 && Δ3_change < 0.001 && Δ4_change < 0.001
+            if κ_change < 0.001 && k1_change < 0.001 && k2_change < 0.001 Δ1_change < 0.001 && Δ2_change < 0.001 #&&
+                #k3_change < 0.001 && k4_change < 0.001 && Δ3_change < 0.001 && Δ4_change < 0.001
                 println("Converged after $iter iterations.")
                 break
             end
 
-            k1_b, k2_b, k3_b, k4_b, Δ1_b, Δ2_b, Δ3_b, Δ4_b, κ_b = k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new
+            #k1_b, k2_b, k3_b, k4_b, Δ1_b, Δ2_b, Δ3_b, Δ4_b, κ_b = k1_new, k2_new, k3_new, k4_new, Δ1_new, Δ2_new, Δ3_new, Δ4_new, κ_new
+            k1_b, k2_b, Δ1_b, Δ2_b, κ_b = k1_new, k2_new, Δ1_new, Δ2_new, κ_new
+
+            θ = draw_samples_positive_one(k1, Δ1, k2, Δ2, κ, bootstrap_data)
+
+            # Update Measurement Parameters
+            μ, α, σ = update(θ, μ, α, σ, bootstrap_data)
         end
 
         # Store the estimated parameters for the bootstrap sample
-        Ψ_bootstrap = [k1_b; k2_b; k3_b; k4_b; vec(Δ1_b); vec(Δ2_b); vec(Δ3_b); vec(Δ4_b); κ_b]
+        #Ψ_bootstrap = [k1_b; k2_b; k3_b; k4_b; vec(Δ1_b); vec(Δ2_b); vec(Δ3_b); vec(Δ4_b); κ_b]
+        Ψ_bootstrap = [k1_b; k2_b; vec(Δ1_b); vec(Δ2_b); κ_b; μ; α; σ]
         bootstrapped_params[:, b] = Ψ_bootstrap
     end
 
@@ -478,16 +606,18 @@ function bootstrap_em(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data, num_boots
 end
 
 # Compute Bootstrapped Standard Errors and Final Parameters
-function compute_final_estimates_and_standard_errors(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data, num_bootstraps::Int, max_iters)
-    num_params = 28    # Number of parameters
+function compute_final_estimates_and_standard_errors(k1, Δ1, k2, Δ2, κ, μ, α, σ, R, data, num_bootstraps::Int, max_iters)
+    num_params = 149    # Number of parameters
     # Estimate parameters on the original data
-    k1_fin, Δ1_fin, k2_fin, Δ2_fin, k3_fin, Δ3_fin, k4_fin, Δ4_fin, κ_fin = em_algorithm(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data; max_iters)
+    #k1_fin, Δ1_fin, k2_fin, Δ2_fin, k3_fin, Δ3_fin, k4_fin, Δ4_fin, κ_fin = em_algorithm(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data; max_iters)
+    k1_fin, Δ1_fin, k2_fin, Δ2_fin, κ_fin, μ, α, σ = em_algorithm(k1, Δ1, k2, Δ2, κ, μ, α, σ, R, data; max_iters)
     
     # Compute bootstrapped parameters
-    bootstrapped_params = bootstrap_em(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data, num_bootstraps, max_iters)
+    #bootstrapped_params = bootstrap_em(k1, Δ1, k2, Δ2, k3, Δ3, k4, Δ4, κ, R, data, num_bootstraps, max_iters)
+    bootstrapped_params = bootstrap_em(k1_fin, Δ1_fin, k2_fin, Δ2_fin, κ_fin, μ, α, σ, R, data, num_bootstraps, max_iters)
 
     # Compute standard errors
-    std_errors = std(bootstrapped_params, dims=2)
+    #std_errors = std(bootstrapped_params, dims=2)
 
     # Compute Confidence Intervals
     alpha = 0.1  # 90% confidence interval
@@ -502,10 +632,11 @@ function compute_final_estimates_and_standard_errors(k1, Δ1, k2, Δ2, k3, Δ3, 
     end    
 
     # Combine final estimates and standard errors in a dictionary for easy access
-    final_estimates = [k1_fin; k2_fin; k3_fin; k4_fin; vec(Δ1_fin); vec(Δ2_fin); vec(Δ3_fin); vec(Δ4_fin); κ_fin]
+    #final_estimates = [k1_fin; k2_fin; k3_fin; k4_fin; vec(Δ1_fin); vec(Δ2_fin); vec(Δ3_fin); vec(Δ4_fin); κ_fin]
+    final_estimates = [k1_fin; k2_fin; vec(Δ1_fin); vec(Δ2_fin); κ_fin; μ; α; σ]
     results = Dict(
         "Final Estimates" => final_estimates,
-        "Standard Errors" => std_errors,
+    #    "Standard Errors" => std_errors,
         "Confidence Intervals" => confidence_intervals
     )
 
@@ -514,15 +645,23 @@ end
 
 # Compute the Signal to Noise Ratio
 function noise(α, σ, θ)
-    J = 7 # The number of measures
+    J = 21 # The number of measures
 
     s = zeros(J)
     
     for j in 1:J
         if j in 1:3 # cognitions
-            s[j] = α[j]^2 * var(θ[:, :, 1]) / (α[j]^2 * var(θ[:, :, 1]) + σ[j]^2)
-        elseif j in 4:7 # gender role
-            s[j] = α[j]^2 * var(θ[:, :, 2]) / (α[j]^2 * var(θ[:, :, 2]) + σ[j]^2)
+            s[j] = α[j]^2 * var(θ[:, 1]) / (α[j]^2 * var(θ[:, 1]) + σ[j]^2)
+        elseif j in 4:6 # cognitions
+            s[j] = α[j]^2 * var(θ[:, 2]) / (α[j]^2 * var(θ[:, 2]) + σ[j]^2)
+        elseif j in 7:9 # cognitions
+            s[j] = α[j]^2 * var(θ[:, 3]) / (α[j]^2 * var(θ[:, 3]) + σ[j]^2)
+        elseif j in 10:13 # gender role
+            s[j] = α[j]^2 * var(θ[:, 4]) / (α[j]^2 * var(θ[:, 4]) + σ[j]^2)
+        elseif j in 14:17 # gender role
+            s[j] = α[j]^2 * var(θ[:, 5]) / (α[j]^2 * var(θ[:, 5]) + σ[j]^2)
+        elseif j in 18:21 # gender role
+            s[j] = α[j]^2 * var(θ[:, 6]) / (α[j]^2 * var(θ[:, 6]) + σ[j]^2)
         end
     end
 
