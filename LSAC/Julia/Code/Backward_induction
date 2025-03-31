@@ -1,0 +1,127 @@
+ if E == Eh # E_{c, T - 1} = 2
+                    #D_minus_y = exp(params[23] + params[24]*(2*(t-1) + 10.5) - params[21] - params[22]*(2*(t-1) + 10.5))
+                    #D_minus_n = exp(params[23] + params[24]*(2*(t-1) + 10.5))
+                    #p_stay_y = 1 / (1 + D_minus_y) #Pr(E_{c, 3} = Eh | E_{c, 2} = Eh)
+                    #p_stay_n = 1 / (1 + D_minus_n)
+                    #p_down_y = D_minus_y / (1 + D_minus_y) #Pr(E_{c, 3} = El | E_{c, 2} = Eh)
+                    #p_down_n = D_minus_n / (1 + D_minus_n)
+                    ψ_c_y = (1 + params[25]*E) + β_c*δ_1[t]*ψc_store[i, t+1, Eh, 2]
+                    ψ_p_y = (1 + φ*params[25]*E) + β_p*δ_1[t]*ψp_store[i, t+1, Eh, 2]
+                    ψ_c_n = (1 + params[25]*E) + β_c*δ_1[t]*ψc_store[i, t+1, Eh, 1]
+                    ψ_p_n = (1 + φ*params[25]*E) + β_p*δ_1[t]*ψp_store[i, t+1, Eh, 1]
+                    #println("ψ_c_y = ", ψ_c_y, ", ψ_p_y = ", ψ_p_y, "ψ_c_n = ", ψ_c_n, ", ψ_p_n = ", ψ_p_n)
+                    χ_y = (1-φ)*params[1] + φ*params[3] + β_p*ψ_p_y*δ_3[t]
+                    χ_n = (1-φ)*params[1] + φ*params[3] + β_p*ψ_p_n*δ_3[t]
+                    c_y = (1-φ)*params[1]*Y[(i-1)*n_age+t] / χ_y
+                    c_n = (1-φ)*params[1]*Y[(i-1)*n_age+t] / χ_n
+                    R_y = φ*params[3] * Y[(i-1)*n_age+t] / χ_y
+                    R_n = φ*params[3] * Y[(i-1)*n_age+t] / χ_n
+                    M_y = β_p*ψ_p_y*δ_3[t]*Y[(i-1)*n_age+t] / χ_y # Educational investment if E = Eh and CPM = 1
+                    M_n = β_p*ψ_p_n*δ_3[t]*Y[(i-1)*n_age+t] / χ_n # Educational investment if E = Eh and CPM = 0
+                    b_y = (β_p*ψ_p_y*δ_2[t] - φ*β_c*ψ_c_y*δ_2[t]) / (φ*params[3])
+                    b_n = 0
+                    τ_y = (β_p*ψ_p_y*δ_2[t]) * (Time - s[(i-1)*n_age+t]) / (φ*params[2] + β_p*ψ_p_y*δ_2[t])
+                    τ_n = (β_c*ψ_c_n*δ_2[t]) * (Time - s[(i-1)*n_age+t]) / (params[2] + β_c*ψ_c_n*δ_2[t])
+                    a_y = log(R_y) - b_y*log(τ_y)
+                    a_n = log(R_n)
+                    
+                    # The parents' and the child's partial indirect value function
+                    V_tilde_p_y = (1 - φ)*params[1]*log(c_y) +  
+                    φ*params[2]*log(Time - s[(i-1)*n_age+t]-τ_y) + φ*params[3]*log(R_y) - ζ +
+                    β_p*ψ_p_y*(A[t] + δ_2[t]*log(τ_y) + δ_3[t]*log(M_y))
+                    V_tilde_c_y = params[2]*log(Time-τ_y-s[(i-1)*n_age+t]) + params[3]*log(R_y) +
+                    β_c*ψ_c_y*(A[t] + δ_2[t]*log(τ_y) + δ_3[t]*log(M_y))
+                    V_tilde_p_n = (1 - φ)*params[1]*log(c_n) +  
+                    φ*params[2]*log(Time - s[(i-1)*n_age+t]-τ_n) + φ*params[3]*log(R_n) +
+                    β_p*ψ_p_n*(A[t] + δ_2[t]*log(τ_n) + δ_3[t]*log(M_n))
+                    V_tilde_c_n = params[2]*log(Time-τ_n-s[(i-1)*n_age+t]) + params[3]*log(R_n) +
+                    β_c*ψ_c_n*(A[t] + δ_2[t]*log(τ_n) + δ_3[t]*log(M_n))
+                    V_p_y = V_tilde_p_y + log(θ[i, t])*((1 + φ*params[25]*E) + β_p*δ_1[t]*ψ_p_y)
+                    V_p_n = V_tilde_p_n + log(θ[i, t])*((1 + φ*params[25]*E) + β_p*δ_1[t]*ψ_p_n)
+                    V_c_y = V_tilde_c_y + log(θ[i, t])*((1 +params[25]*E) + β_c*δ_1[t]*ψ_c_y)
+                    V_c_n = V_tilde_c_n + log(θ[i, t])*((1 +params[25]*E) + β_c*δ_1[t]*ψ_c_n)
+                    if V_p_y >= V_p_n
+                        CPM_opt[i, t, E_index] = 1
+                        V_p[i, t, E_index] = V_p_y
+                        V_c[i, t, E_index] = V_c_y
+                    else
+                        CPM_opt[i, t, E_index] = 0 
+                        V_p[i, t, E_index] = V_p_n
+                        V_c[i, t, E_index] = V_c_n
+                    end
+                    V_p_store[i, t, E_index] = V_p[i, t, E_index]
+                    V_c_store[i, t, E_index] = V_c[i, t, E_index]
+                    τ_store[i, t, E_index, 1] = τ_n
+                    τ_store[i, t, E_index, 2] = τ_y
+                    M_store[i, t, E_index, 1] = M_n
+                    M_store[i, t, E_index, 2] = M_y
+                    R_store[i, t, E_index, 1] = R_n
+                    R_store[i, t, E_index, 2] = R_y
+                    ψc_store[i, t, E_index, 1] = ψ_c_n
+                    ψc_store[i, t, E_index, 2] = ψ_c_y
+                    ψp_store[i, t, E_index, 1] = ψ_p_n
+                    ψp_store[i, t, E_index, 2] = ψ_p_y
+                elseif E == El
+                    #D_plus_y = exp(params[19] + params[20]*(2*(t-1) + 10.5) + params[21] + params[22]*(2*(t-1) + 10.5)) # Provide CPM (CPM_T = 1)
+                    #D_plus_n = exp(params[19] + params[20]*(2*(t-1) + 10.5)) # No CPM (CPM_T = 1)
+                    #p_up_y = D_plus_y / (1 + D_plus_y) # p^up(j, CPM_t)
+                    #p_stay_y = 1 / (1 + D_plus_y)
+                    #p_up_n = D_plus_n / (1 + D_plus_n) # p^up(j, CPM_t)
+                    #p_stay_n = 1 / (1 + D_plus_n)
+                    ψ_c_y = (1 + params[25]*E) + β_c*δ_1[t]*ψc_store[i, t+1, El, 2]
+                    ψ_p_y = (1 + φ*params[25]*E) + β_p*δ_1[t]*ψp_store[i, t+1, El, 2]
+                    ψ_c_n = (1 + params[25]*E) + β_c*δ_1[t]*ψc_store[i, t+1, El, 1]
+                    ψ_p_n = (1 + φ*params[25]*E) + β_p*δ_1[t]*ψp_store[i, t+1, El, 1]
+                    #println("ψ_c_y = ", ψ_c_y, ", ψ_p_y = ", ψ_p_y, "ψ_c_n = ", ψ_c_n, ", ψ_p_n = ", ψ_p_n)
+                    χ_y = (1-φ)*params[1] + φ*params[3] + β_p*ψ_p_y*δ_3[t]
+                    χ_n = (1-φ)*params[1] + φ*params[3] + β_p*ψ_p_n*δ_3[t]
+                    c_y = (1-φ)*params[1]*Y[(i-1)*n_age+t] / χ_y
+                    c_n = (1-φ)*params[1]*Y[(i-1)*n_age+t] / χ_n
+                    R_y = φ*params[3] * Y[(i-1)*n_age+t] / χ_y
+                    R_n = φ*params[3] * Y[(i-1)*n_age+t] / χ_n
+                    M_y = β_p*ψ_p_y*δ_3[t]*Y[(i-1)*n_age+t] / χ_y
+                    M_n = β_p*ψ_p_n*δ_3[t]*Y[(i-1)*n_age+t] / χ_n
+                    b_y = (β_p*ψ_p_y*δ_2[t] - φ*β_c*ψ_c_y*δ_2[t]) / (φ*params[3])
+                    b_n = 0
+                    τ_y = (β_p*ψ_p_y*δ_2[t]) * (Time - s[(i-1)*n_age+t]) / (φ*params[2] + β_p*ψ_p_y*δ_2[t])
+                    τ_n = (β_c*ψ_c_n*δ_2[t]) * (Time - s[(i-1)*n_age+t]) / (params[2] + β_c*ψ_c_n*δ_2[t])
+                    a_y = log(R_y) - b_y*log(τ_y)
+                    a_n = log(R_n)
+                    # The parents' and the child's partial indirect value function
+                    #println("a_n = ", a_n, ", b_n = ", b_n, ", τ_n = ", τ_n, ", M_n = ", M_n, ", A = ", A[t])
+                    V_tilde_p_y = (1 - φ)*params[1]*log(c_y) +  
+                    φ*params[2]*log(Time - s[(i-1)*n_age+t]-τ_y) + φ*params[3]*log(R_y) - ζ +
+                    β_p*ψ_p_y*(A[t] + δ_2[t]*log(τ_y) + δ_3[t]*log(M_y))
+                    V_tilde_c_y = params[2]*log(Time-τ_y-s[(i-1)*n_age+t]) + params[3]*log(R_y) +
+                    β_c*ψ_c_y*(A[t] + δ_2[t]*log(τ_y) + δ_3[t]*log(M_y))
+                    V_tilde_p_n = (1 - φ)*params[1]*log(c_n) +  
+                    φ*params[2]*log(Time - s[(i-1)*n_age+t]-τ_n) + φ*params[3]*log(R_n) +
+                    β_p*ψ_p_n*(A[t] + δ_2[t]*log(τ_n) + δ_3[t]*log(M_n))
+                    V_tilde_c_n = params[2]*log(Time-τ_n-s[(i-1)*n_age+t]) + params[3]*log(R_n) +
+                    β_c*ψ_c_n*(A[t] + δ_2[t]*log(τ_n) + δ_3[t]*log(M_n))
+                    V_p_y = V_tilde_p_y + log(θ[i, t])*((1 + φ*params[25]*E) + β_p*δ_1[t]*ψ_p_y)
+                    V_p_n = V_tilde_p_n + log(θ[i, t])*((1 + φ*params[25]*E) + β_p*δ_1[t]*ψ_p_n)
+                    V_c_y = V_tilde_c_y + log(θ[i, t])*((1 +params[25]*E) + β_c*δ_1[t]*ψ_c_y)
+                    V_c_n = V_tilde_c_n + log(θ[i, t])*((1 +params[25]*E) + β_c*δ_1[t]*ψ_c_n)
+                    if V_p_y >= V_p_n
+                        CPM_opt[i, t, E_index] = 1
+                        V_p[i, t, E_index] = V_p_y
+                        V_c[i, t, E_index] = V_c_y
+                    else
+                        CPM_opt[i, t, E_index] = 0 
+                        V_p[i, t, E_index] = V_p_n
+                        V_c[i, t, E_index] = V_c_n
+                    end
+                    V_p_store[i, t, E_index] = V_p[i, t, E_index]
+                    V_c_store[i, t, E_index] = V_c[i, t, E_index]
+                    τ_store[i, t, E_index, 1] = τ_n
+                    τ_store[i, t, E_index, 2] = τ_y
+                    M_store[i, t, E_index, 1] = M_n
+                    M_store[i, t, E_index, 2] = M_y
+                    R_store[i, t, E_index, 1] = R_n
+                    R_store[i, t, E_index, 2] = R_y
+                    ψc_store[i, t, E_index, 1] = ψ_c_n
+                    ψc_store[i, t, E_index, 2] = ψ_c_y
+                    ψp_store[i, t, E_index, 1] = ψ_p_n
+                    ψp_store[i, t, E_index, 2] = ψ_p_y
+                end
