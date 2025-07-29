@@ -28,25 +28,29 @@ using StatsBase
 
 # Set "include" path
 cd("/Users/clairekim/Desktop/Project/Child Development/LSAC/code/")
-include("backward_induction.jl")
+#include("backward_induction.jl")
 include("smm.jl")
-include("theta.jl")
-include("counterfactual.jl")
+#include("theta.jl")
+#include("counterfactual.jl")
+include("nonbinding.jl")
 
 # Load the CSV file (replace 'your_file.csv' with the actual file path)
-params1 = CSV.read("params1.csv", DataFrame)
+params1c = CSV.read("params1.csv", DataFrame) # Cognitive Skill Production Parameters
+params1n = CSV.read("params1_n.csv", DataFrame) # Non-cognitive Skill Production Parameters
 
 # Convert the first column of the DataFrame into a vector (assuming the values are in the first column)
-params1 = params1[!, 1]  # The '!' symbol means to extract the entire column
+params1c = params1c[!, 1]  # The '!' symbol means to extract the entire column
+params1n = params1n[!, 1]  # The '!' symbol means to extract the entire column
 
 # Now `params` contains your 15 elements from the CSV file
-println(params1)
+println(params1c)
+println(params1n)
 
 # Load data from the CSV file
-df2 = CSV.File("data_2nd.csv") # First-stage estimation
+df_all = CSV.File("data_2nd.csv") # First-stage estimation
 
 # Convert to a DataFrame
-df2 = DataFrame(df2)
+df_all = DataFrame(df_all)
 
 # Define new column names
 #colnames = ["cid", "cage", "mage", "Ec", "Ep", "female", "CPM", "read", "num", "write", "Y", "s", "τ", "medu"]
@@ -55,156 +59,152 @@ df2 = DataFrame(df2)
 # 1. Model Estimation
 # ------------------------------------------------------------------------------
 
-df_matrix2 = Matrix(df2)
+df_matrix_all = Matrix(df_all)
 
 # Extract columns
-cid = df_matrix2[:, 1]        # Child's ID
-age = df_matrix2[:, 2]       # Child's Age (time period)
-mage = df_matrix2[:, 3]          # Mother's Age
-hyp = df_matrix2[:, 4]         # Child's Sustained attention
-cage = df_matrix2[:, 5]       # Child's Actual Age
-female = df_matrix2[:, 6]    # Child Gender
-CPM = df_matrix2[:, 7]       # CPM Choice   
-Y = df_matrix2[:, 8]       # Household Weekly Income
-s = df_matrix2[:, 9]         # School Hours
-τ = df_matrix2[:, 10]         # Study Time
-medu = df_matrix2[:, 11]         # Mother's Educational Attainment
-pm = df_matrix2[:, 12]         # Weekly Amount of Pockey Money
-M = df_matrix2[:, 13]         # Weekly Educational Investment
+cid = df_matrix_all[:, 1]        # Child's ID
+age = df_matrix_all[:, 2]       # Child's Age (time period)
+lito = df_matrix_all[:, 3]          # LITO amount
+cage = df_matrix_all[:, 4]       # Child's Actual Age
+CPM = df_matrix_all[:, 5]       # CPM Choice   
+Y = df_matrix_all[:, 6]       # Household Weekly Income
+s = df_matrix_all[:, 7]         # School Hours
+τ = df_matrix_all[:, 8]         # Study Time
+medu = df_matrix_all[:, 9]         # Mother's Educational Attainment
+pm = df_matrix_all[:, 10]         # Weekly Amount of Pockey Money
+M = df_matrix_all[:, 11]         # Weekly Educational Investment
+read = df_matrix_all[:, 12]         # Reading Score
+hyp = df_matrix_all[:, 13]         # Hyperactivity
 
 # Primitives
 β_c = 0.90            # Child's Discount Factor
 β_p = 0.95            # Parent's Discount Factor
-Time = 70               # Total available hours per week
+Time = 16               # Total available hours per day (Assume sleeping time 8 hours)
 φ = 0.333 # Parental Altruism
 
 # Grids and dimensions
-n_c = length(unique(df_matrix2[:, 1]))  # Number of children
+n_c = length(unique(df_matrix_all[:, 1]))  # Number of children
 n_age = 3   # Length of Age
 
 # Add error-free non-cognitive skills column at the end
 
 # Run the simulation
-simulated_skills = recover_latent_skills_from_sdq(n_c, n_age, df_matrix2; mu_0 = -2.94, mu_1 = 1.0, p_min = 0.05)
+#simulated_skills = recover_latent_skills_from_sdq(n_c, n_age, df_matrix2; mu_0 = -2.94, mu_1 = 1.0, p_min = 0.05)
 # Initialize an empty vector to store the flattened values
-simulated_skills_flat = Float64[]
+#simulated_skills_flat = Float64[]
 
 # Loop over each household (n_c) and each time period (n_age)
-for h in 1:n_c
-    for t in 1:n_age
-        push!(simulated_skills_flat, simulated_skills[h, t])
-    end
-end
+#for h in 1:n_c
+#    for t in 1:n_age
+#        push!(simulated_skills_flat, simulated_skills[h, t])
+#    end
+#end
 
 # Ensure the lengths match before appending the new column
-if length(simulated_skills_flat) == size(df_matrix2, 1)
+#if length(simulated_skills_flat) == size(df_matrix2, 1)
     # Add the flattened simulated_skills_flat as the 14th column to df_matrix2
-    df_matrix2 = hcat(df_matrix2, simulated_skills_flat)
-else
-    println("Error: Lengths do not match!")
-end
+#    df_matrix2 = hcat(df_matrix2, simulated_skills_flat)
+#else
+#    println("Error: Lengths do not match!")
+#end
 
 # Ensure the flattened simulated skills are correctly aligned with the original 2D matrix
 #println("Min of simulated_skills before flattening: ", minimum(simulated_skills))
 #println("Min of simulated_skills_flat before adding to df_matrix2: ", minimum(simulated_skills_flat))
 
-df_matrix2[:, 14] = simulated_skills_flat
+#df_matrix_all[:, 14] = simulated_skills_flat
 #println("Min of df_matrix2[:, 14] after direct assignment: ", minimum(df_matrix2[:, 14]))
 
-ncog = df_matrix2[:, 14]         # Error-free non-cognitive skills
+#ncog = df_matrix2[:, 14]         # Error-free non-cognitive skills
 #println("Min of ncog after direct assignment: ", minimum(ncog))
 
 # Plot the change in average cognitive skills over time
-avgncog = [mean(df_matrix2[(df_matrix2[:, 2] .== 1), 14]), mean(df_matrix2[(df_matrix2[:, 2] .== 2), 14]),
-            mean(df_matrix2[(df_matrix2[:, 2] .== 3), 14])]
+#avgncog = [mean(df_matrix2[(df_matrix2[:, 2] .== 1), 14]), mean(df_matrix2[(df_matrix2[:, 2] .== 2), 14]),
+#            mean(df_matrix2[(df_matrix2[:, 2] .== 3), 14])]
 
 # Define the periods with age ranges as strings
-periods = ["10-11", "12-13", "14-15"]
+#periods = ["10-11", "12-13", "14-15"]
 
 # Create the plot with two lines, one for avgcogstar and one for avgcog
-plot(periods, [avgncog[1], avgncog[2], avgncog[3]], 
-     linestyle=:solid, marker=:circle, color=:blue, 
-     xlabel="Age", ylabel="Average Log Non-cognitive Skills", legend=false)
+#plot(periods, [avgncog[1], avgncog[2], avgncog[3]], 
+#     linestyle=:solid, marker=:circle, color=:blue, 
+#     xlabel="Age", ylabel="Average Log Non-cognitive Skills", legend=false)
 
 # Increase the plot size (more space to the right)
 #plot!(size=(800, 600))  # Increase width to make room for right margin
 
 # Save the plot as a PNG file
-savefig("/Users/clairekim/Desktop/Project/Child Development/LSAC/code/figs/avgncog.png")
+#savefig("/Users/clairekim/Desktop/Project/Child Development/LSAC/code/figs/avgncog.png")
 
 # Set initial parameters
-μ_α0 = 1.9486051781512574 # (1)
+μ_α0 = 3.9486051781512574 # (1)
 μ_α1 = 5.845281172537979 # (2) Parents' preference over their private consumption
-μ_λ0 = 1.56010011676641336 # (3)
-μ_λ1 = 3.3980908796074916 # (4) Child's preference over their own leisure
+μ_λ0 = 3.56010011676641336 # (3)
+μ_λ1 = 6.3980908796074916 # (4) Child's preference over their own leisure
 μ_λ2 = -0.3740589847479265 #(5) Child's preference over their allowances
 σ_α0 = 0.37665265821818583 # (6)
 σ_α1 = 1.264443379625691  #(7) Parents' preference over their private consumption
-σ_λ0 = 0.69206822359429025 # (8)
-σ_λ1 = 1.9400379840077878 #(9) Child's preference over their own leisure
+σ_λ0 = 0.29206822359429025 # (8)
+σ_λ1 = 2.0400379840077878 #(9) Child's preference over their own leisure
 σ_λ2 = 0.21056483249447828 #(10) Child's preference over their allowances
-σ_ζ = 0.08 # (11) CPM Cost distribution
-#ν_γ = 0.19722458 #(8) Scaling factor of leisure preference given CPM
+σ_ζ = 0.03 # (11) CPM Cost distribution
+α01 = 0.05 # (12) Covariance between child cognition and parent consumption
+λ01 = -0.111 # (13) Covariance between child cognition and child leisure
+λ02 = 0.05 # (14) Covariance between child cognition and child pocket money
+λ12 = 0.0688 # (15) Covariance between child leisure and child pocket money
+α0λ0 = 0.05 #(16) Covariance between child cognition and parent child cognition
+α0λ1 = -0.05 # (17) Covariance between parent child cognition and child leisure
+α0λ2 = 0.05  #(18) Covariance between parent child cognition and child pocket money
+α1λ0 = -0.050 #(19) Covariance between parent consumption and child cognition
+α1λ1 = 0.008 # (20) Covariance between parent consumption and child leisure
+α1λ2 = 0.005  #(21) Covariance between parent consumption and child pocket money
 
-A_n_1 = -0.084363504930927625 #(12) TFP at age 10 - 11 for non-cognitive skills
-δ_n_11 = 1.0087965646977628 #(13) marginal effect of lagged non-cognitive skills at age 10 - 11
-δ_n_12 = 0.012082581541337335 #(14) marginal effect of CPM at age 10 - 11
-δ_n_13 = 0.022812886844361096 #(15) marginal effect of τ at age 10 - 11
-A_n_2 = -0.06963701621138713 #(16) TFP at age 12 - 13 for non-cognitive skills
-δ_n_21 = 1.0562804126986171 #(17) marginal effect of lagged non-cognitive skills at age 12 - 13
-δ_n_22 = 0.009382506138460695 #(18) marginal effect of CPM at age 12 - 13
-δ_n_23 = 0.02524925035463933 #(19) marginal effect of \tau at age 12 - 13
-A_n_3 = -0.04402184651868996 #(20) TFP at age 14 - 15 for non-cognitive skills
-δ_n_31 = 1.09744994417844743 #(21) marginal effect of lagged non-cognitive skills at age 14 - 15
-δ_n_32 = 0.00816541751549295 #(22) marginal effect of CPM at age 14 - 15
-δ_n_33 = 0.02805375813558389 #(23) marginal effect of \tau at age 14 - 15
+params_all = [μ_α0, μ_α1, μ_λ0, μ_λ1, μ_λ2, σ_α0, σ_α1, σ_λ0, σ_λ1, σ_λ2, σ_ζ, α01, λ01, λ02, λ12, α0λ0, α0λ1, α0λ2, α1λ0, α1λ1, α1λ2]
 
-params2 = [μ_α0, μ_α1, μ_λ0, μ_λ1, μ_λ2, σ_α0, σ_α1, σ_λ0, σ_λ1, σ_λ2, σ_ζ,
- A_n_1, δ_n_11, δ_n_12, δ_n_13, A_n_2, δ_n_21, δ_n_22, δ_n_23, A_n_3, δ_n_31, δ_n_32, δ_n_33]
-ReMatrix(GenAvgMoments(params1, params2, df_matrix2))
-ReMatrix_est(GenAvgMoments_est(params1, params2, df_matrix2))
-value_func(params1, params2, n_c, n_age, ncog, s, Time, Y)
+value_func(MersenneTwister(1234), params1c, params1n, params_all, n_c, n_age, s, Time, Y, CT, lito)
+ReMatrix(GenAvgMoments(MersenneTwister(1234), params1c, params1n, params_all, df_matrix_all))
+
+# ==============================================================================
+# 1. Baseline Model
+# ------------------------------------------------------------------------------
+
+CT = zeros(n_c*n_age)
 
 #(1) Use only 1000 iterations to get better guesses of the parameters
 
-# Define the optimization options
-#options1 = Optim.Options(
-#    iterations = 1000,      # Max number of iterations       # Relative tolerance for convergence criterion (change for Subplex)
-#    g_tol = 1e-6          # Gradient tolerance (convergence criterion)
-#)
-# Ensure that each parameter doesn't go below its corresponding lower bound
-#lower_bounds = [0.0, 0.0, 0.0, NaN, NaN, 0.0, NaN, NaN, NaN, 0.0, 0.0, 0.0,
-#0.0, 0.0, 0.0, 0.0, 0.0, 0.0, NaN, NaN, 
-#NaN, NaN, NaN, NaN, 0.0, NaN, NaN, NaN]
-
-# Replace NaNs with -Inf (free variables) for those parameters
-#lower_bounds = [isnan(x) ? -Inf : x for x in lower_bounds]
-
-function objective_function_w(params1, params2, df_matrix)
+function objective_function(params1c, params1n, params_all, df_matrix)
     
+    rng = MersenneTwister(1234) # Fixed seed for current iteration to ensure each optimizer iteration gets consistent random draws, but still reflects changes in parameters
     # Call the Calibrate function, passing the parameters (which are now constrained)
-    return Calibrate_w(params1, params2, df_matrix)
+    return Calibrate(rng, params1c, params1n, params_all, df_matrix)
+end
+
+function objective_function_w(params1c, params1n, params_all, df_matrix)
+    
+    rng = MersenneTwister(1234) # Fixed seed for current iteration to ensure each optimizer iteration gets consistent random draws, but still reflects changes in parameters
+    # Call the Calibrate function, passing the parameters (which are now constrained)
+    return Calibrate_w(rng, params1c, params1n, params_all, df_matrix)
 end
 
 # Optimize using Nelder-Mead
 # Set the options
 opts = Optim.Options(
-    iterations = 1000000,       # Maximum number of iterations
+    iterations = 1000,       # Maximum number of iterations
     g_tol = 1e-6,           # Function tolerance (change in the function value)
     show_trace = true,       # Show optimization progress
 )
 
 # Run the optimizer with Nelder-Mead method and the correct options
 result1 = optimize(
-    p -> objective_function_w(params1, p, df_matrix2),  # Objective function
-    params2,  # Initial guess for the parameters
+    p -> objective_function_w(params1c, params1n, p, df_matrix_all),  # Objective function
+    params_all,  # Initial guess for the parameters
     NelderMead(),  # Derivative-free method
     opts   # Pass the options
 )
 
-# Retrieve the optimized parameters
+# Retrieve the optimized parameters if notconverged within 1000 iterations
 parametervals = Optim.minimizer(result1)
-value_func(params1, parametervals, n_c, n_age, ncog, s, Time, Y)
+value_func(MersenneTwister(1234), params1c, params1n, parametervals, n_c, n_age, s, Time, Y, CT, lito)
 
 opts2 = Optim.Options(
     iterations = 1000000000,       # Maximum number of iterations
@@ -214,79 +214,125 @@ opts2 = Optim.Options(
 
 # Call the optimization function
 result2 = optimize(
-    p -> objective_function_w(params1, p, df_matrix2),  # Objective function
+    p -> objective_function_w(params1c, params1n, p, df_matrix_all),  # Objective function
     parametervals,  # Initial guess for the parameters
+    NelderMead(),  # Derivative-free method
+    opts2   # Pass the options
+)
+
+result2 = optimize(
+    p -> objective_function(params1c, params1n, p, df_matrix_all),  # Objective function
+    params_all,  # Initial guess for the parameters
     NelderMead(),  # Derivative-free method
     opts2   # Pass the options
 )
 
 # Retrieve the (final) optimized parameters
 params_fin = Optim.minimizer(result2)
-ReMatrix_est(GenAvgMoments_est(params1, params_fin, df_matrix2))
 
-function bootstrap_CIs(params1, params2, df_matrix::Matrix, B::Int)
-    estimates = []
+individuals = unique(df_matrix_all[:, 1])  # Unique individuals
+num_params = length(parametervals)          # Number of parameters
 
-    # Get unique child IDs from the first column (assumed)
-    unique_ids = unique(df_matrix[:, 1])
+bootstrapped_params = zeros(100, num_params)
 
-    for b in 1:B
-        println("Bootstrap replication $b...")
+for b in 1:100
+    # Generate bootstrap sample by sampling individuals with replacement
+    bootstrap_ids = sample(individuals, length(individuals), replace=true)
 
-        try
-            # Step 1: Resample child IDs with replacement
-            resampled_ids = rand(unique_ids, length(unique_ids))
+    # Ensure all individuals present at least once:
+    missing_inds = setdiff(individuals, bootstrap_ids)
+    bootstrap_ids = vcat(bootstrap_ids, missing_inds)
+    
+    filtered_rows = filter(row -> in(row[1], bootstrap_ids), eachrow(df_matrix_all))
+    bootstrap_sample = reduce(vcat, [row' for row in filtered_rows])
 
-            # Step 2: Construct bootstrap sample by ID
-            bootstrap_sample = vcat([df_matrix[df_matrix[:, 1] .== id, :] for id in resampled_ids]...)
+    # MDE on bootstrap sample
+    params_b = parametervals
 
-            # Step 3: Re-estimate parameters on bootstrap sample
-            obj_fun = p -> objective_function(params1, p, bootstrap_sample)
+    result_b = optimize(
+            p -> objective_function_w(params1c, params1n, p, bootstrap_sample),
+            params_b,
+            NelderMead(),
+            Optim.Options(iterations=1000, g_tol=1e-6, show_trace=false)
+        )
+    
+    # Extract optimal parameters
+    paramas_bootstrap = Optim.minimizer(result_b)
 
-            result = optimize(
-                obj_fun,
-                params2,  # Initial guess
-                NelderMead(),
-                Optim.Options(iterations=1000, f_tol=1e-6, show_trace=false)
-            )
-
-            est_params2 = Optim.minimizer(result)
-            # If `params1` are fixed, you can just return those alongside:
-            push!(estimates, vcat(params1, est_params2))
-
-        catch e
-            println("Bootstrap replication $b failed with error: $e")
-        end
-    end
-
-    # Step 4: Convert list of estimates into a matrix
-    estimates_mat = hcat(estimates...)'  # B x (length(params1) + length(params2))
-
-    # Step 5: Compute confidence intervals (2.5% and 97.5% quantiles)
-    lower_bound = mapslices(x -> quantile(x, 0.025), estimates_mat, dims=1)
-    upper_bound = mapslices(x -> quantile(x, 0.975), estimates_mat, dims=1)
-
-    return lower_bound, upper_bound, estimates_mat
+    # Store the estimated parameters for the bootstrap sample
+    bootstrapped_params[b, :] = paramas_bootstrap
 end
 
-result3 = optimize(
-    p -> objective_function_w(params1, p, df_matrix2),  # Objective function
-    params_fin,  # Initial guess for the parameters
-    NelderMead(),
-    opts2
-)
+individuals = unique(df_matrix_all[:, 1])  # Unique individuals
+num_params = length(parametervals)
 
-params_fin = Optim.minimizer(result3)
+bootstrapped_params = zeros(100, num_params)
 
-value_func(params1, params_fin, n_c, n_age, ncog, s, Time, Y)
+for b in 1:100
+    # Sample individuals with replacement
+    bootstrap_ids = sample(individuals, length(individuals), replace=true)
+
+    # To avoid empty sample, ensure at least one copy of each individual
+    # (optional) but you can do that like this:
+    bootstrap_ids = union(bootstrap_ids, individuals)  # Force all present at least once
+
+    # Filter all rows for sampled individuals
+    filtered_rows = filter(row -> in(row[1], bootstrap_ids), eachrow(df_matrix_all))
+    bootstrap_sample = reduce(vcat, [row' for row in filtered_rows])
+
+    # If filtered_rows is empty (rare), skip iteration or handle error
+    if isempty(filtered_rows)
+        @warn "Empty bootstrap sample at iteration $b"
+        bootstrapped_params[b, :] .= NaN
+        continue
+    end
+
+    params_b = parametervals
+
+    try
+        result_b = optimize(
+            p -> objective_function_w(params1c, params1n, p, bootstrap_sample),
+            params_b,
+            NelderMead(),
+            Optim.Options(iterations=1000, g_tol=1e-6, show_trace=false)
+        )
+        params_bootstrap = Optim.minimizer(result_b)
+
+        if any(isnan, params_bootstrap)
+            bootstrapped_params[b, :] .= NaN
+        else
+            bootstrapped_params[b, :] .= params_bootstrap
+        end
+
+    catch e
+        bootstrapped_params[b, :] .= NaN
+        @warn "Optimization failed in bootstrap iteration $b: $e"
+    end
+end
+
+# Filter successful bootstrap samples
+valid_rows = findall(row -> all(.!isnan.(row)), eachrow(bootstrapped_params))
+param_boot_clean = bootstrapped_params[valid_rows, :]
+
+# 95% confidence intervals
+ci_lower = mapslices(p -> quantile(p, 0.025), param_boot_clean; dims=1)
+ci_upper = mapslices(p -> quantile(p, 0.975), param_boot_clean; dims=1)
+
+# Combine into readable output
+confidence_intervals = hcat(ci_lower', ci_upper')  # Each row: [lower upper] for a param
+
+# Display
+for (i, ci) in enumerate(eachrow(confidence_intervals))
+    println("Param $i: 95% CI = [", round(ci[1], digits=4), ", ", round(ci[2], digits=4), "]")
+end
 
 # Save results
 
-flatten_params2 = vcat(params_fin...)
-df_params2 = DataFrame(estimated_params2 = flatten_params2)
+flatten_params_fin = vcat(parametervals...)
+df_params_fin = DataFrame(estimated_params_fin = flatten_params_fin)
 
 # Save to CSV
-CSV.write("params2.csv", df_params2)
+CSV.write("params_fin.csv", df_params_fin)
 
 #result3 = optimize(objective_function, params_fin, NelderMead())
 #params_temp = Optim.minimizer(result3)
@@ -298,43 +344,39 @@ CSV.write("params2.csv", df_params2)
 # ------------------------------------------------------------------------------
 
 # Generate true data moments
-true_moments = ReMatrix(GenMoments(df_matrix2))
-true_moments = ReMatrix_est(GenMoments_est(df_matrix2))
+true_moments = ReMatrix(GenMoments(df_matrix_all))
+true_moments_est = ReMatrix_est(GenMoments_est(df_matrix_all))
 
-# Generate simulated data and average simulated data moments
-#sim_data = Simulate(parametervals, n_c, n_age, Ep, s, Time, df_matrix)
-#sim_data = Simulate(params_fin, n_c, n_age, Ep, s, Time, df_matrix)
-
-#sim_moments = ReMatrix(GenAvgMoments(params1, params_fin, df_matrix2))
-sim_moments = ReMatrix_est(GenAvgMoments_est(params1, params_fin, df_matrix2))
+sim_moments = ReMatrix(GenAvgMoments(MersenneTwister(1234), params1c, params1n, params_fin, df_matrix_all))
+sim_moments = ReMatrix(GenAvgMoments(MersenneTwister(1234), params1c, params1n, parametervals, df_matrix_all))
+sim_moments_est = ReMatrix_est(GenAvgMoments_est(MersenneTwister(1234), params1c, params1n, parametervals, df_matrix_all))
 #sim_moments = ReMatrix(GenAvgMoments(params1, params2, df_matrix2))
 
 using CSV
 
 # Assuming true_moments and sim_moments are vectors of vectors
 # Flatten the vectors
-flatten_true_moments = vcat(true_moments...)
+flatten_true_moments_est = vcat(true_moments_est...)
 #data_mom_temp = DataFrame(true_moments = flatten_true_moments)
 #CSV.write("data_mom_temp.csv", data_mom_temp)
 
-flatten_sim_moments = vcat(sim_moments...)
+flatten_sim_moments_est = vcat(sim_moments_est...)
 #model_mom_temp = DataFrame(sim_moments = flatten_sim_moments)
 #CSV.write("model_mom_temp.csv", model_mom_temp)
 
 # Combine them into a 2-column DataFrame
-df_moments = DataFrame(true_moments = flatten_true_moments, sim_moments = flatten_sim_moments)
+df_moments = DataFrame(true_moments_est = flatten_true_moments_est, sim_moments_est = flatten_sim_moments_est)
 
 # Save to CSV
 CSV.write("moments_data.csv", df_moments)
 
 # ==============================================================================
-# 3. Counterfactual Experiments
+# 3. Counterfactual Policies
 # ------------------------------------------------------------------------------
 
-#(A) Quantifying the effect of CPM
+# (A) CPM Adoption Change
 
-# Overall Effect
-cf_result = GenAvgMoments_cf(params1, params_fin, df_matrix2)
+cf_result = GenAvgMoments_cf(params1c, params1n, parametervals, df_matrix_all)
 println(cf_result)
 
 # Inequality
