@@ -1,3 +1,17 @@
+
+# ==============================================================================
+# Project Title: The Dynamics of Parent-Child Interactions in Shaping Cognitive and
+# Non-cognitive Development during Adolescence
+# Author: Claire Kim
+# Institution: University of Wisconsin-Madison
+# Start Date: 06/01/2025
+# Description:
+#
+# This script implements a dynamic model of child development with a focus on
+# parental incentive and self-investment on cognitive and non-cognitive traits
+# using non-binding participation constraints
+# ==============================================================================
+
 using JuMP, Ipopt, LinearAlgebra, StaticArrays
 
 # Extract CPM Subproblem
