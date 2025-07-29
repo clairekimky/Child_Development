@@ -28,13 +28,10 @@ using StatsBase
 
 # Set "include" path
 cd("/Users/clairekim/Desktop/Project/Child Development/LSAC/code/")
-include("backward_induction.jl")
-include("smm.jl")
-include("theta.jl")
 #include("smm_DW.jl")
 
 # Load data from the CSV file
-df1 = CSV.File("data_1st.csv") # First-stage estimation
+df1 = CSV.File("data_1st_n.csv") # First-stage estimation
 
 # Convert to a DataFrame
 df1 = DataFrame(df1)
@@ -46,130 +43,62 @@ df1 = DataFrame(df1)
 # 1. Model Estimation
 # ------------------------------------------------------------------------------
 
-# Step 0: Measurement parameters
-
 df_matrix1 = Matrix(df1)
-n_age = 3   # Length of Age
-n_c = length(unique(df_matrix1[:, 1]))  # Number of children
 
-μ_0, μ_1 = factor(df_matrix1, n_age)
-signal, noise = signal_and_noise(df_matrix1, n_age)
-
-# Plot the change in average cognitive skills over time
-avgcog = mean_theta(df_matrix1, n_age)
-
-# Define the periods with age ranges as strings
-periods = ["10-11", "12-13", "14-15"]
-
-# Create the plot with two lines, one for avgcogstar and one for avgcog
-plot(periods, [avgcog[1], avgcog[2], avgcog[3]], 
-     linestyle=:solid, marker=:circle, color=:blue, 
-     xlabel="Age", ylabel="Average Log Cognitive Skills", legend=false)
-
-# Increase the plot size (more space to the right)
-#plot!(size=(800, 600))  # Increase width to make room for right margin
-
-# Save the plot as a PNG file
-savefig("/Users/clairekim/Desktop/Project/Child Development/LSAC/code/figs/avgcog.png")
-
-# Add error-free non-cognitive skills column at the end
-
-# Run the simulation
-simulated_skills = recover_latent_skills_from_sdq(n_c, n_age, df_matrix1; mu_0 = -2.94, mu_1 = 1.0, p_min = 0.05)
-# Initialize an empty vector to store the flattened values
-simulated_skills_flat = Float64[]
-
-# Loop over each household (n_c) and each time period (n_age)
-for h in 1:n_c
-    for t in 1:n_age
-        push!(simulated_skills_flat, simulated_skills[h, t])
-    end
-end
-
-# Ensure the lengths match before appending the new column
-if length(simulated_skills_flat) == size(df_matrix1, 1)
-    # Add the flattened simulated_skills_flat as the 14th column to df_matrix2
-    df_matrix1 = hcat(df_matrix1, simulated_skills_flat)
-else
-    println("Error: Lengths do not match!")
-end
-
-df_matrix1[:, 12] = simulated_skills_flat
-ncog = df_matrix1[:, 12]         # Error-free non-cognitive skills
-
-# Plot the change in average cognitive skills over time
-avgncog1 = mean(df_matrix1[(df_matrix1[:, 2] .== 1), 12])
-avgncog2 = mean(df_matrix1[(df_matrix1[:, 2] .== 2), 12])
-avgncog3 = mean(df_matrix1[(df_matrix1[:, 2] .== 3), 12])
-
-# Define the periods with age ranges as strings
-periods = ["10-11", "12-13", "14-15"]
-
-# Create the plot with two lines, one for avgcogstar and one for avgcog
-plot(periods, [avgncog1, avgncog2, avgncog3], 
-     linestyle=:solid, marker=:circle, color=:blue, 
-     xlabel="Age", ylabel="Average Log Non-Cognitive Skills", legend=false)
-
-# Increase the plot size (more space to the right)
-#plot!(size=(800, 600))  # Increase width to make room for right margin
-
-# Save the plot as a PNG file
-savefig("/Users/clairekim/Desktop/Project/Child Development/LSAC/code/figs/avgncog.png")
-
-# Step 1: Estimate production parameters
+# Step 1: Estimate production parameters for cognitive skills
 
 # Set initial parameters
-A_c_1 = -0.0866 #(1) TFP at age 10 - 11 for cognitive skills
-δ_c_11 = 0.573 #(2) marginal effect of lagged cognitive skills at age 10 - 11
-δ_c_12 = 0.076 #(3) marginal effect of study time at age 10 - 11
-δ_c_13 = 0.062 #(4) marginal effect of education-related goods at age 10 - 11
-δ_c_14 = 0.135 #(5) marginal effect of the interaction between lagged non-cognitive skills and study time at age 10 - 11
-A_c_2 = -0.0864 #(6) TFP at age 12 - 13 for cognitive skills
-δ_c_21 = 0.533 #(7) marginal effect of lagged cognitive skills at age 12 - 13
-δ_c_22 = 0.082 #(8) marginal effect of study time at age 12 - 13
-δ_c_23 = 0.068 #(9) marginal effect of education-related goods at age 12 - 13
-δ_c_24 = 0.149 #(10) marginal effect of the interaction between lagged non-cognitive skills and study time at age 12 - 13
-A_c_3 = -0.0858 #(11) TFP at age 14 - 15 for cognitive skills
-δ_c_31 = 0.494 #(12) marginal effect of lagged cognitive skills at age 14 - 15
-δ_c_32 = 0.090 #(13) marginal effect of study time at age 14 - 15
-δ_c_33 = 0.069 #(14) marginal effect of education-related goods at age 14 - 15
-δ_c_34 = 0.163 #(15) marginal effect of the interaction between lagged non-cognitive skills and study time at age 14 - 15
+A_c_1 = -0.0475 #(1) TFP at age 10 - 11 for cognitive skills
+δ_c_11 = 0.7721 #(2) marginal effect of lagged cognitive skills at age 10 - 11
+δ_c_12 = 0.0533 #(3) marginal effect of study time at age 10 - 11
+δ_c_13 = 0.2461 #(4) marginal effect of education-related goods at age 10 - 11
+δ_c_14 = 0.1728 #(5) marginal effect of the interaction between lagged non-cognitive skills and study time at age 10 - 11
+A_c_2 = -0.0416 #(6) TFP at age 12 - 13 for cognitive skills
+δ_c_21 = 0.7550 #(7) marginal effect of lagged cognitive skills at age 12 - 13
+δ_c_22 = 0.0703 #(8) marginal effect of study time at age 12 - 13
+δ_c_23 = 0.3027 #(9) marginal effect of education-related goods at age 12 - 13
+δ_c_24 = 0.2278 #(10) marginal effect of the interaction between lagged non-cognitive skills and study time at age 12 - 13
+A_c_3 = -0.0498 #(11) TFP at age 14 - 15 for cognitive skills
+δ_c_31 = 0.6789 #(12) marginal effect of lagged cognitive skills at age 14 - 15
+δ_c_32 = 0.0907 #(13) marginal effect of study time at age 14 - 15
+δ_c_33 = 0.2693 #(14) marginal effect of education-related goods at age 14 - 15
+δ_c_34 = 0.2719 #(15) marginal effect of the interaction between lagged non-cognitive skills and study time at age 14 - 15
 
 params1 = [A_c_1, δ_c_11, δ_c_12, δ_c_13, δ_c_14, A_c_2, δ_c_21, δ_c_22, δ_c_23, δ_c_24,
  A_c_3, δ_c_31, δ_c_32, δ_c_33, δ_c_34]
 
 #params1[5] = 0.121
 
-function moment_conditions(params1, df_matrix1)
+function moment_conditions_cog(params1, df_matrix1; return_residuals=false)
     groups = [1, 2, 3]
     all_moments = []
+    residual_list = []
 
-    μ_0, μ_1 = factor(df_matrix1, n_age)
+    #μ_0, μ_1 = factor(df_matrix1, n_age)
 
     for (i, group) in enumerate(groups)
         # Filter valid rows
-        valid_rows = filter(row -> row[2] == group && row[3] != -999 && 
-                                       row[11] != -999, eachrow(df_matrix1))
+        valid_rows = filter(row -> row[2] == group && row[3] > 0 && 
+                                       row[10] > 0 && row[11] != -999, eachrow(df_matrix1))
 
         if length(valid_rows) == 0
             continue
         end
 
         # Extract variables
-        z_f = log.([row[5] for row in valid_rows])                      # future proxy (θ_{j,t+1})
-        z = log.([row[8] for row in valid_rows])              # current proxy (θ_{j,t})
-        log_tau = log.([row[11] for row in valid_rows])               # log(τ_{c,t})
+        z_f = log.([row[4] for row in valid_rows])                      # future proxy (θ_{j,t+1})
+        z = log.([row[7] for row in valid_rows])              # current proxy (θ_{j,t})
+        log_tau = log.([row[10] for row in valid_rows])               # log(τ_{c,t})
         log_M = log.([row[3] for row in valid_rows])                  # log(M_t)
-        log_hyp = log.([row[12] for row in valid_rows])
-        interaction = log_tau .* log_hyp         # log(τ_{c,t}) * log(θ_{t}^N)
+        hyp = log.([row[11] for row in valid_rows])
 
         # Rescale proxies
-        z_f_tilde = (z_f .- μ_0[1, i]) ./ μ_1[1, i]
-        z_tilde = (z .- μ_0[1, i]) ./ μ_1[1, i]
+        #z_f_tilde = (z_f .- μ_0[1, i]) ./ μ_1[1, i]
+        #z_tilde = (z .- μ_0[1, i]) ./ μ_1[1, i]
 
         # Instruments: lagged alternate proxies (assumed uncorrelated measurement errors)
-        inst1 = log.([row[9] for row in valid_rows])
-        inst2 = log.([row[10] for row in valid_rows])
+        inst1 = log.([row[8] for row in valid_rows])
+        inst2 = log.([row[9] for row in valid_rows])
         instruments = hcat(inst1, inst2)
 
         # Parameter block for group
@@ -181,36 +110,58 @@ function moment_conditions(params1, df_matrix1)
         δ4 = params1[offset + 5]
 
         # Predicted values
-        fitted = ln_A .+ δ1 .* z_tilde .+ δ2 .* log_tau .+ δ3 .* log_M .+ δ4 .* interaction
+        fitted = ln_A .+ δ1 .* z .+ δ2 .* log_tau .+ δ3 .* log_M .+ δ4 .* hyp
+        residuals = z_f .- fitted
+        residual_list = vcat(residual_list, residuals)
 
-        # Residuals: full composite error term
-        residuals = z_f_tilde .- fitted
-
-        # Moment conditions: residuals × instruments (broadcast correctly)
         moments = hcat([residuals .* instruments[:, j] for j in 1:size(instruments, 2)]...)
         push!(all_moments, moments)
     end
 
-    return vcat(all_moments...)
+    if return_residuals
+        return vcat(all_moments...), residual_list
+    else
+        return vcat(all_moments...)
+    end
 end
 
 function gmm_objective(params, data)
-    m = moment_conditions(params, data)
+    m = moment_conditions_cog(params, data)
     g = vec(mean(m, dims=1))
     return dot(g, g)  # Simple GMM with identity weighting matrix
 end
 
-# Initial parameter guess: 5 parameters per group × 3 groups = 15
-res_prod = optimize(
+res_step1 = optimize(
     p -> gmm_objective(p, df_matrix1),
     params1,
-    NelderMead(),
-    Optim.Options(iterations = 5000, f_tol = 1e-8, x_tol = 1e-8)
+    LBFGS()
+)
+params_step1 = Optim.minimizer(res_step1)
+
+function compute_optimal_weight_matrix(params, data)
+    m = moment_conditions_cog(params, data)
+    g = m .- mean(m, dims=1)  # center the moment conditions
+    W = (g' * g) / size(g, 1)  # covariance of moment conditions
+    return inv(W)
+end
+
+function gmm_objective_weighted(params, data, W)
+    m = moment_conditions_cog(params, data)
+    g = vec(mean(m, dims=1))
+    return g' * W * g
+end
+
+W_opt = compute_optimal_weight_matrix(params_step1, df_matrix1)
+
+res_step2 = optimize(
+    p -> gmm_objective_weighted(p, df_matrix1, W_opt),
+    params_step1,
+    LBFGS()
 )
 
-println(res_prod.minimizer)
+params_step2 = Optim.minimizer(res_step2)
 
-params1[1:15] = res_prod.minimizer[1:15]
+println(params_step2)
 
 # Bootstrapped CI
 num_bootstrap = 100  # Number of bootstrap repetitions
@@ -230,6 +181,9 @@ for b in 1:num_bootstrap
     # Resample household IDs with replacement
     sampled_ids = sample(household_ids, H, replace=true)
     
+    # Print sampled household IDs for debugging
+    #println("Bootstrap iteration $b: Sampled IDs = ", sampled_ids)
+    
     # Build resampled dataframe
     df_b = vcat([
         df_matrix1[df_matrix1[:, 1] .== hh, :] for hh in sampled_ids
@@ -237,18 +191,30 @@ for b in 1:num_bootstrap
 
     # Try-catch in case optimization fails
     try
-        res_b = optimize(
+        # Step 1: First-step GMM with identity matrix
+        res1 = optimize(
             p -> gmm_objective(p, df_b),
-            params1,  # Use original as starting point
-            NelderMead(),
-            Optim.Options(iterations=1000)
+            params1,
+            LBFGS()
         )
-
-        param_boot[b, :] .= res_b.minimizer
+        params_step1_b = Optim.minimizer(res1)
+    
+        # Step 2: Compute optimal weighting matrix using first-step parameters
+        W_b = compute_optimal_weight_matrix(params_step1_b, df_b)
+    
+        # Step 3: Second-step GMM using optimal weighting
+        res2 = optimize(
+            p -> gmm_objective_weighted(p, df_b, W_b),
+            params_step1_b,
+            LBFGS()
+        )
+        param_boot[b, :] .= Optim.minimizer(res2)
+    
     catch e
         println("Bootstrap iteration $b failed: ", e)
         param_boot[b, :] .= NaN
     end
+    
 end
 
 # Filter successful bootstrap samples
@@ -269,9 +235,203 @@ end
 
 # Save the results
 
-flatten_params1 = vcat(params1...)
+flatten_params1 = vcat(params_step2...)
 
 df_params1 = DataFrame(estimated_params1 = flatten_params1)
 
 # Save to CSV
 CSV.write("params1.csv", df_params1)
+
+# Step 2: Estimate production parameters for non-cognitive skills
+
+df2 = CSV.File("data_1st_n_n.csv") # First-stage estimation
+df2 = DataFrame(df2)
+df_matrix2 = Matrix(df2)
+
+# Set initial parameters
+A_n_1 = -0.1722 #(1) TFP at age 10 - 11 for cognitive skills
+δ_n_11 = 0.4117 #(2) marginal effect of lagged non-cognitive skills at age 10 - 11
+δ_n_12 = 0.1106 #(3) marginal effect of study time at age 10 - 11
+δ_n_13 = 0.0540 #(4) marginal effect of cognitive skills at age 10 - 11
+A_n_2 = -0.2031 #(6) TFP at age 12 - 13 for non-cognitive skills
+δ_n_21 = 0.4197 #(7) marginal effect of lagged cognitive skills at age 12 - 13
+δ_n_22 = 0.1003 #(8) marginal effect of study time at age 12 - 13
+δ_n_23 = 0.0931 #(9) marginal effect of cognitive skills at age 12 - 13
+A_n_3 =  -0.1437 #(11) TFP at age 14 - 15 for non-cognitive skills
+δ_n_31 = 0.5291 #(12) marginal effect of lagged cognitive skills at age 14 - 15
+δ_n_32 = 0.0549 #(13) marginal effect of study time at age 14 - 15
+δ_n_33 = 0.1203 #(14) marginal effect of cognitive skills at age 14 - 15
+
+params1_n = [A_n_1, δ_n_11, δ_n_12, δ_n_13, A_n_2, δ_n_21, δ_n_22, δ_n_23, A_n_3, δ_n_31, δ_n_32, δ_n_33]
+params1_n = [-0.17049315921681948, 0.41378286807046233, 0.10972098902911573, 0.06426998199902382, -0.200515596082284, 0.4213910702737982, 0.10146865025706114, 0.09735748676826982, -0.1416495395882353, 0.5314774386497868, 0.05497577376829011, 0.132985151675138]
+
+function moment_conditions_ncog(params1, df_matrix2; return_residuals=false)
+    groups = [1, 2, 3]
+    all_moments = []
+    residual_list = []
+
+    #μ_0, μ_1 = factor(df_matrix1, n_age)
+
+    for (i, group) in enumerate(groups)
+        # Filter valid rows
+        valid_rows = filter(row -> row[2] == group && row[7] > 0 && row[4] != -999, eachrow(df_matrix2))
+
+        if length(valid_rows) == 0
+            continue
+        end
+
+        # Extract variables
+        z_f = log.([row[11] for row in valid_rows])                      # future proxy (θ_{j,t+1})
+        z = log.([row[8] for row in valid_rows])              # current proxy (θ_{j,t})
+        log_tau = log.([row[7] for row in valid_rows])               # log(τ_{c,t})
+        cog = log.([row[4] for row in valid_rows])
+
+        # Rescale proxies
+        #z_f_tilde = (z_f .- μ_0[1, i]) ./ μ_1[1, i]
+        #z_tilde = (z .- μ_0[1, i]) ./ μ_1[1, i]
+
+        # Instruments: lagged alternate proxies (assumed uncorrelated measurement errors)
+        inst1 = log.([row[9] for row in valid_rows])
+        inst2 = log.([row[10] for row in valid_rows])
+        instruments = hcat(inst1, inst2)
+
+        # Parameter block for group
+        offset = (i - 1) * 4
+        ln_A = params1[offset + 1]
+        δ1 = params1[offset + 2]
+        δ2 = params1[offset + 3]
+        δ3 = params1[offset + 4]
+
+        # Predicted values
+        fitted = ln_A .+ δ1 .* z .+ δ2 .* log_tau .+ δ3 .* cog
+        residuals = z_f .- fitted
+        residual_list = vcat(residual_list, residuals)
+
+        moments = hcat([residuals .* instruments[:, j] for j in 1:size(instruments, 2)]...)
+        push!(all_moments, moments)
+    end
+
+    if return_residuals
+        return vcat(all_moments...), residual_list
+    else
+        return vcat(all_moments...)
+    end
+end
+
+function gmm_objective_n(params, data)
+    m = moment_conditions_ncog(params, data)
+    g = vec(mean(m, dims=1))
+    return dot(g, g)  # Simple GMM with identity weighting matrix
+end
+
+res_step1_n = optimize(
+    p -> gmm_objective_n(p, df_matrix2),
+    params1_n,
+    LBFGS()
+)
+params_step1_n = Optim.minimizer(res_step1_n)
+
+function compute_optimal_weight_matrix_n(params, data)
+    m = moment_conditions_ncog(params, data)
+    g = m .- mean(m, dims=1)  # center the moment conditions
+    W = (g' * g) / size(g, 1)  # covariance of moment conditions
+    return inv(W)
+end
+
+function gmm_objective_weighted_n(params, data, W)
+    m = moment_conditions_ncog(params, data)
+    g = vec(mean(m, dims=1))
+    return g' * W * g
+end
+
+W_opt = compute_optimal_weight_matrix_n(params_step1_n, df_matrix2)
+
+res_step2_n = optimize(
+    p -> gmm_objective_weighted_n(p, df_matrix2, W_opt),
+    params_step1_n,
+    LBFGS()
+)
+
+params_step2_n = Optim.minimizer(res_step2_n)
+
+println(params_step2_n)
+
+# Bootstrapped CI
+num_bootstrap = 100  # Number of bootstrap repetitions
+param_boot = zeros(num_bootstrap, length(params1_n))
+
+# Get unique household IDs
+household_ids = unique(df_matrix2[:, 1])
+H = length(household_ids)
+
+for b in 1:num_bootstrap
+
+    # Print progress every 10 iterations
+    if b % 10 == 0
+        println("Bootstrap iteration $b / $num_bootstrap")
+    end
+
+    # Resample household IDs with replacement
+    sampled_ids = sample(household_ids, H, replace=true)
+    
+    # Print sampled household IDs for debugging
+    #println("Bootstrap iteration $b: Sampled IDs = ", sampled_ids)
+    
+    # Build resampled dataframe
+    df_b = vcat([
+        df_matrix2[df_matrix2[:, 1] .== hh, :] for hh in sampled_ids
+    ]...)
+
+    # Try-catch in case optimization fails
+    try
+        # Step 1: First-step GMM with identity matrix
+        res1 = optimize(
+            p -> gmm_objective_n(p, df_b),
+            params1_n,
+            LBFGS()
+        )
+        params_step1_b = Optim.minimizer(res1)
+    
+        # Step 2: Compute optimal weighting matrix using first-step parameters
+        W_b = compute_optimal_weight_matrix_n(params_step1_b, df_b)
+    
+        # Step 3: Second-step GMM using optimal weighting
+        res2 = optimize(
+            p -> gmm_objective_weighted_n(p, df_b, W_b),
+            params_step1_b,
+            LBFGS()
+        )
+        param_boot[b, :] .= Optim.minimizer(res2)
+    
+    catch e
+        println("Bootstrap iteration $b failed: ", e)
+        param_boot[b, :] .= NaN
+    end
+    
+end
+
+# Filter successful bootstrap samples
+valid_rows = findall(row -> all(.!isnan.(row)), eachrow(param_boot))
+param_boot_clean = param_boot[valid_rows, :]
+
+# 95% confidence intervals
+ci_lower = mapslices(p -> quantile(p, 0.025), param_boot_clean; dims=1)
+ci_upper = mapslices(p -> quantile(p, 0.975), param_boot_clean; dims=1)
+
+# Combine into readable output
+confidence_intervals = hcat(ci_lower', ci_upper')  # Each row: [lower upper] for a param
+
+# Display
+for (i, ci) in enumerate(eachrow(confidence_intervals))
+    println("Param $i: 95% CI = [", round(ci[1], digits=4), ", ", round(ci[2], digits=4), "]")
+end
+
+# Save the results
+
+flatten_params1_n = vcat(params_step2_n...)
+
+df_params1_n = DataFrame(estimated_params1_n = flatten_params1_n)
+
+# Save to CSV
+CSV.write("params1_n.csv", df_params1_n)
+
