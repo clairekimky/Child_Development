@@ -14,59 +14,108 @@
 
 using JuMP, Ipopt, LinearAlgebra, StaticArrays
 
+function make_pos_def(Σ::Matrix{Float64}; ε::Float64 = 1e-6, max_attempts::Int = 10)
+    attempt = 0
+    while attempt < max_attempts
+        try
+            _ = cholesky(Σ)  # Attempt factorization
+            return Σ         # Success: return as is
+        catch e
+            if e isa PosDefException || e isa LinearAlgebra.LAPACKException
+                Σ += ε * I   # Add small ridge
+                ε *= 10      # Increase ε if needed
+                attempt += 1
+            else
+                rethrow(e)   # Some other error: propagate
+            end
+        end
+    end
+    error("Failed to make matrix positive definite after $max_attempts attempts.")
+end
+
 # Extract CPM Subproblem
 function solve_CPM_subproblem(
-    Time, s_it, Y_it, CT_it, lito_it, ζ,
+    Time, s_it, Y_it, CT_it, ζ,
     ψcc, ψcn, ψpc, ψpn, α_1, λ_0, λ_1, λ_2,
-    params1c, params1n, β_p, β_c, φ, Vc_star, n_age
+    params1c, params1n, β_p, β_c, φ, Vc_star, n_age, τ_star, R_star, M_star, Vp_star
 )
     model = Model(Ipopt.Optimizer)
+    set_optimizer_attribute(model, "tol", 1e-4)  # General tolerance
+    set_optimizer_attribute(model, "constr_viol_tol", 1e-8)
+    #set_optimizer_attribute(model, "dual_inf_tol", 1e-5)
+    #set_optimizer_attribute(model, "primal_inf_tol", 1e-5)  # Ensure this is supported by your version of IPOPT
+    #set_optimizer_attribute(model, "max_iter", 500)  # Increase max iterations if needed
+    set_optimizer_attribute(model, "print_level", 1)  # Verbosity for debugging
+    #set_silent(model)
+    # 0 for completely silent (set_silent(model))
+    # 1 for final output summary only
+    # 3 for iteration summary such as objective or constraints
+    # 5 for full verbosity with diagnostic info
 
-    @variable(model, 0.01 <= τ_p <= Time - s_it - 0.01)
+    @variable(model, 0.01 <= τ_p <= (Time - s_it - 0.01))
     @variable(model, 0.01 <= R_p)
     @variable(model, 0.01 <= M_p)
 
-    set_start_value(τ_p, 0.5 * (0.01 + Time - s_it - 0.01))
-    set_start_value(R_p, 1.0)
-    set_start_value(M_p, 1.0)
+    # Use conservative but valid starting points
+    set_start_value(R_p, max(R_star, 0.01 + 1e-6))
+    set_start_value(M_p, max(M_star, 0.01 + 1e-6))
+    set_start_value(τ_p, max(τ_star, 0.01 + 1e-6))
 
-    @NLexpression(model, l_p, Time - s_it - τ_p)
-    @NLexpression(model, c_p, Y_it + lito_it + CT_it - M_p - R_p)
+    # Use τ_p passed in as fixed (scalar) value
+    #τ_p_val = clamp(τ_p, 0.01, Time - s_it - 0.01)
 
+    # Expressions
+    @NLexpression(model, l_p, (Time - s_it - τ_p))
+    @NLexpression(model, c_p, (Y_it + CT_it - M_p - R_p))
+
+    @NLconstraint(model, τ_p >= τ_star + 1e-6)
     @NLconstraint(model, l_p >= 0.01)
     @NLconstraint(model, c_p >= 0.01)
 
     @NLexpression(model, Vc_cpm,
-        λ_0 * λ_1 * log(l_p) + λ_2 * log(R_p) +
+        (λ_1 * log(l_p) + λ_2 * log(R_p) +
         β_c * ψcc * (params1c[n_age*5-2] * log(τ_p) + params1c[n_age*5-1] * log(M_p)) +
-        β_c * ψcn * (params1n[n_age*4-2] * log(τ_p))
+        β_c * ψcn * (params1n[n_age*4-1] * log(τ_p)))
     )
 
     @NLexpression(model, Vp_cpm,
-        (1 - φ) * α_1 * log(c_p) + φ * λ_1 * log(l_p) + φ * λ_2 * log(R_p) - ζ +
+        ((1 - φ) * α_1 * log(c_p) + φ * λ_1 * log(l_p) + φ * λ_2 * log(R_p) - ζ +
         β_p * ψpc * (params1c[n_age*5-2] * log(τ_p) + params1c[n_age*5-1] * log(M_p)) +
-        β_p * ψpn * (params1c[n_age*4-2] * log(τ_p))
+        β_p * ψpn * (params1c[n_age*4-1] * log(τ_p)))
     )
 
     @NLconstraint(model, Vc_cpm >= Vc_star)
     @NLobjective(model, Max, Vp_cpm)
 
     optimize!(model)
+    #println("τ_p = ", value(τ_p), " | τ_star = ", τ_star, " | Status = ", termination_status(model))
     status = termination_status(model)
     
-    if status == MOI.OPTIMAL || status == MOI.LOCALLY_SOLVED
-        return value(τ_p), value(R_p), value(M_p), objective_value(model)
+    # If the optimization is successful, return results
+    if status in [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
+        # Solver succeeded (at least locally)
+        optimized_τ_p = value(τ_p)
+        
+        # Warn if optimized τ_p is numerically below τ_star (which shouldn't happen)
+        if optimized_τ_p < τ_star
+            println("⚠️ τ_p = $(round(optimized_τ_p, digits=10)), τ_star = $(round(τ_star, digits=10))")
+        end
+
+        return optimized_τ_p, value(R_p), value(M_p), objective_value(model)
+
     else
-        return nothing, nothing, nothing, -Inf
+        # Solver actually failed
+        println("❌ Solver failed with status: ", status)
+        return τ_star, R_star, M_star, Vp_star - 1e-6
     end
+
 end
 
-
 # Backward Induction starting from period t = T
-function value_func(rng::AbstractRNG, params1c, params1n, params_all, n_c, n_age, s, Time, Y, CT, lito)
+function value_func(rng, params1c, params1n, params, n_c, n_age, s, Time, Y, CT)
 
     # Initialize value functions for parents and children at period t
-    CPM_opt = zeros(Int, n_c, n_age) # Differ by i, t, E_c, and CPM
+    CPM_opt = zeros(Int64, n_c, n_age) # Differ by i, t, E_c, and CPM
     τ_opt = zeros(n_c, n_age) 
     M_opt = zeros(n_c, n_age) # Differ by i, t, E_c, and CPM
     R_opt = zeros(n_c, n_age) 
@@ -75,129 +124,93 @@ function value_func(rng::AbstractRNG, params1c, params1n, params_all, n_c, n_age
     ψpc_store = zeros(n_c, n_age)
     ψpn_store = zeros(n_c, n_age)
 
-    # Lists to store the estimated alpha and lambda values
-    alpha_0_vals, alpha_1_vals, alpha_2_vals = [], [], []
-    lambda_0_vals, lambda_1_vals, lambda_2_vals, lambda_3_vals = [], [], [], []
+    α_0_vec = zeros(n_c)
+    α_1_vec = zeros(n_c)
+    α_2_vec = zeros(n_c)
+    λ_0_vec = zeros(n_c)
+    λ_1_vec = zeros(n_c)
+    λ_2_vec = zeros(n_c)
+    λ_3_vec = zeros(n_c)
 
-    μ = params_all[1:5]  # Mean vector
+    μ = params[1:5]  # Mean vector
     Σ = [
-        (params_all[6])^2  params_all[12]  params_all[16]  params_all[17]  params_all[18];
-        params_all[12]  (params_all[7])^2  params_all[19]  params_all[20]  params_all[21];
-        params_all[16]  params_all[19]  (params_all[8])^2  params_all[13]  params_all[14];
-        params_all[17]  params_all[20]  params_all[13]  (params_all[9])^2  params_all[15];
-        params_all[18]  params_all[21]  params_all[14]  params_all[15] (params_all[10])^2
+        (params[6])^2  params[12]  params[16]  params[17]  params[18];
+        params[12]  (params[7])^2  params[19]  params[20]  params[21];
+        params[16]  params[19]  (params[8])^2  params[13]  params[14];
+        params[17]  params[20]  params[13]  (params[9])^2  params[15];
+        params[18]  params[21]  params[14]  params[15] (params[10])^2
     ] # Covariance matrix (diagonal)
 
+    # Fix it only if needed
+    Σ = make_pos_def(Σ)
+
     # Parents
-    for i = 1:n_c
+    Threads.@threads for i = 1:n_c
+        local_rng = MersenneTwister(1234) # To avoid thread contention
+        ν = rand(local_rng, MvNormal(SVector{5}(μ), Σ))
+
         # Random draw from preference parameters
-        ν = rand(rng, MvNormal(SVector{5}(μ), Σ)) 
         α_0 = exp(ν[1]) / (1 + exp(ν[1]) + exp(ν[2]))
         α_1 = exp(ν[2]) / (1 + exp(ν[1]) + exp(ν[2]))
         α_2 = 1 / (1 + exp(ν[1]) + exp(ν[2]))
-        λ_0 = exp(ν[3]) / (1 + exp(ν[3]) + exp(ν[4]) + exp(ν[5]))
-        λ_1 = exp(ν[4]) / (1 + exp(ν[3]) + exp(ν[4]) + exp(ν[5]))
-        λ_2 = exp(ν[5]) / (1 + exp(ν[3]) + exp(ν[4]) + exp(ν[5]))
-        λ_3 = 1 / (1 + exp(ν[3]) + exp(ν[4]) + exp(ν[5]))
+
+        λ_sum = 1 + exp(ν[3]) + exp(ν[4]) + exp(ν[5])
+        λ_0 = exp(ν[3]) / λ_sum
+        λ_1 = exp(ν[4]) / λ_sum
+        λ_2 = exp(ν[5]) / λ_sum
+        λ_3 = 1 / λ_sum
 
         # Store the current values of alpha and lambda parameters
-        push!(alpha_0_vals, α_0)
-        push!(alpha_1_vals, α_1)
-        push!(alpha_2_vals, α_2)
-        push!(lambda_0_vals, λ_0)
-        push!(lambda_1_vals, λ_1)
-        push!(lambda_2_vals, λ_2)
-        push!(lambda_3_vals, λ_3)
+        α_0_vec[i] = α_0
+        α_1_vec[i] = α_1
+        α_2_vec[i] = α_2
+        λ_0_vec[i] = λ_0
+        λ_1_vec[i] = λ_1
+        λ_2_vec[i] = λ_2
+        λ_3_vec[i] = λ_3
 
         # CPM cost for different cases
-        ζ = rand(rng, Exponential(params_all[11]))
+        ζ = rand(local_rng, Exponential(params[11]))
         
-        for t = n_age:n_age
+        for t = n_age:-1:1
             # Initialize
-            χ, c_star, A, C, l_star, τ_star, R_star, M_star, Vc_star, Vp_star = 
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-
-            ψcc_store[i, t] = λ_0 * (1 - (β_c)^(t + 1)) / (1 - β_c) # ψ_{c, T + 1}^C
-            ψcn_store[i, t] = λ_3 * (1 - (β_c)^(t + 1)) / (1 - β_c) # ψ_{c, T + 1}^N
-            ψpc_store[i, t] = (α_0*(1 - φ)*(1 - (β_p)^(t + 1)) / (1 - β_p)) + φ*ψcc_store[i, t] # ψ_{p, T + 1}^C
-            ψpn_store[i, t] = (α_2*(1 - φ)*(1 - (β_p)^(t + 1)) / (1 - β_p)) + φ*ψcn_store[i, t] # ψ_{p, T + 1}^N
+            if t == n_age
+                ψcc_store[i, t] = λ_0 * (1 - (β_c)^(t + 1)) / (1 - β_c) # ψ_{c, T + 1}^C
+                ψcn_store[i, t] = λ_3 * (1 - (β_c)^(t + 1)) / (1 - β_c) # ψ_{c, T + 1}^N
+                ψpc_store[i, t] = (α_0*(1 - φ)*(1 - (β_p)^(t + 1)) / (1 - β_p)) + φ*ψcc_store[i, t] # ψ_{p, T + 1}^C
+                ψpn_store[i, t] = (α_2*(1 - φ)*(1 - (β_p)^(t + 1)) / (1 - β_p)) + φ*ψcn_store[i, t] # ψ_{p, T + 1}^N
+            else
+                ψcc_store[i, t] = λ_0 + β_c*params1c[t*5+2]*ψcc_store[i, t + 1] # ψ_{c, T}^C
+                ψcn_store[i, t] = λ_3 + β_c*params1n[t*4+2]*ψcn_store[i, t + 1] # ψ_{c, T}^N
+                ψpc_store[i, t] = (1 - φ)*α_0 + φ*λ_0 + β_p*params1c[t*5+2]*ψpc_store[i, t + 1] # ψ_{p, T + 1}^C
+                ψpn_store[i, t] = (1 - φ)*α_2 + φ*λ_3 + β_p*params1n[t*4+2]*ψpn_store[i, t + 1] # ψ_{p, T + 1}^N
+            end
             
             ψcc, ψcn, ψpc, ψpn = ψcc_store[i, t], ψcn_store[i, t], ψpc_store[i, t], ψpn_store[i, t]
             Y_it = Y[(i-1)*n_age+t]
             CT_it = CT[(i-1)*n_age+t]
-            lito_it = lito[(i-1)*n_age+t]
             s_it = s[(i-1)*n_age+t]
 
             χ = (1-φ)*α_1 + φ*λ_2 + β_p*ψpc_store[i, t]*params1c[n_age*5-1]
-            c_star = (1-φ)*α_1*(Y_it+lito_it + CT_it) / χ # Parents' Consumption
-            R_star = φ*λ_2*(Y_it+lito_it + CT_it) / χ # Child's Allowances
-            M_star = β_p*ψpc_store[i, t]*params1c[n_age*5-1]*(Y_it +lito_it + CT_it) / χ # Educational Investment Goods
+            c_star = (1-φ)*α_1*(Y_it + CT_it) / χ # Parents' Consumption
+            R_star = φ*λ_2*(Y_it + CT_it) / χ # Child's Allowances
+            M_star = β_p*ψpc_store[i, t]*params1c[n_age*5-1]*(Y_it + CT_it) / χ # Educational Investment Goods
 
             C = β_p*(ψpc_store[i, t]*params1c[n_age*5-2] + ψpn_store[i, t]*params1n[n_age*4-1])
             A = β_c*(ψcc_store[i, t]*params1c[n_age*5-2] + ψcn_store[i, t]*params1n[n_age*4-1])
             τ_star = A*(Time - s_it) / (λ_1 + A) # Closed-form optimal child effort (no CPM)
             l_star = Time - s_it - τ_star
             Vc_star = λ_1*log(l_star) + λ_2*log(R_star) + β_c*ψcc_store[i, t]*(params1c[n_age*5-2]*log(τ_star) + params1c[n_age*5-1]*log(M_star)) +
-             β_c*ψcn_store[i, t]*(params1n[n_age*4-2]*log(τ_star))
+             β_c*ψcn_store[i, t]*(params1n[n_age*4-1]*log(τ_star))
             Vp_star = (1 - φ)*α_1*log(c_star) + φ*λ_1*log(l_star) + φ*λ_2*log(R_star) +
              β_p*ψpc_store[i, t]*(params1c[n_age*5-2]*log(τ_star) + params1c[n_age*5-1]*log(M_star)) +
-              β_p*ψpn_store[i, t]*(params1n[n_age*4-2] * log(τ_star))
+              β_p*ψpn_store[i, t]*(params1n[n_age*4-1] * log(τ_star))
+            #τ_p = C*(Time - s_it) / (φ*λ_1 + C)
             
             τ_cpm_opt, R_cpm_opt, M_cpm_opt, Vp_cpm_val = solve_CPM_subproblem(
-                Time, s_it, Y_it, CT_it, lito_it, ζ,
+                Time, s_it, Y_it, CT_it, ζ,
                 ψcc, ψcn, ψpc, ψpn, α_1, λ_0, λ_1, λ_2,
-                params1c, params1n, β_p, β_c, φ, Vc_star, n_age
-            )
-
-            if Vp_cpm_val > Vp_star
-                #println("\n=> Parents will implement CPM.")
-                τ_opt[i, t] = τ_cpm_opt
-                R_opt[i, t] = R_cpm_opt
-                M_opt[i, t] = M_cpm_opt
-                CPM_opt[i, t] = 1
-            elseif Vp_cpm_val <= Vp_star
-                #println("\n=> Parents will not implement CPM.")
-                τ_opt[i, t] = τ_star
-                R_opt[i, t] = R_star
-                M_opt[i, t] = M_star
-                CPM_opt[i, t] = 0
-            end
-        end 
-        for t=n_age-1:-1:1
-            # Initialize
-            χ, c_star, A, C, l_star, τ_star, R_star, M_star, Vc_star, Vp_star = 
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-
-            ψcc_store[i, t] = λ_0 + β_c*params1c[t*5+2]*ψcc_store[i, t + 1] # ψ_{c, T}^C
-            ψcn_store[i, t] = λ_3 + β_c*params1n[t*4+2]*ψcn_store[i, t + 1] # ψ_{c, T}^N
-            ψpc_store[i, t] = (1 - φ)*α_0 + φ*λ_0 + β_p*params1c[t*5+2]*ψpc_store[i, t + 1] # ψ_{p, T + 1}^C
-            ψpn_store[i, t] = (1 - φ)*α_2 + φ*λ_3 + β_p*params1n[t*4+2]*ψpn_store[i, t + 1] # ψ_{p, T + 1}^N
-
-            ψcc, ψcn, ψpc, ψpn = ψcc_store[i, t], ψcn_store[i, t], ψpc_store[i, t], ψpn_store[i, t]
-            Y_it = Y[(i-1)*n_age+t]
-            CT_it = CT[(i-1)*n_age+t]
-            lito_it = lito[(i-1)*n_age+t]
-            s_it = s[(i-1)*n_age+t]
-
-            χ = (1-φ)*α_1 + φ*λ_2 + β_p*ψpc_store[i, t]*params1c[t*5-1]
-            c_star = (1-φ)*α_1*(Y_it+lito_it + CT_it) / χ # Parents' Consumption
-            R_star = φ*λ_2*(Y_it+lito_it + CT_it) / χ # Child's Allowances
-            M_star = β_p*ψpc_store[i, t]*params1c[t*5-1]*(Y_it+lito_it + CT_it) / χ # Educational Investment Goods
-            
-            C = β_p*(ψpc_store[i, t]*params1c[t*5-2] + ψpn_store[i, t]*params1n[t*4-1])
-            A = β_c*(ψcc_store[i, t]*params1c[t*5-2] + ψcn_store[i, t]*params1n[t*4-1])
-            τ_star = A*(Time - s_it) / (λ_1 + A)
-            l_star = Time - s_it - τ_star
-            Vc_star = λ_1*log(l_star) + λ_2*log(R_star) + β_c*ψcc_store[i, t]*(params1c[t*5-2]*log(τ_star) + params1c[t*5-1]*log(M_star)) +
-             β_c*ψcn_store[i, t]*(params1n[t*4-2]*log(τ_star))
-            Vp_star = (1 - φ)*α_1*log(c_star) + φ*λ_1*log(l_star) + φ*λ_2*log(R_star) +
-             β_p*ψpc_store[i, t]*(params1c[t*5-2]*log(τ_star) + params1c[t*5-1]*log(M_star)) +
-              β_p*ψpn_store[i, t]*(params1n[t*4-2] * log(τ_star))
-            
-            τ_cpm_opt, R_cpm_opt, M_cpm_opt, Vp_cpm_val = solve_CPM_subproblem(
-                Time, s_it, Y_it, CT_it, lito_it, ζ,
-                ψcc, ψcn, ψpc, ψpn, α_1, λ_0, λ_1, λ_2,
-                params1c, params1n, β_p, β_c, φ, Vc_star, t
+                params1c, params1n, β_p, β_c, φ, Vc_star, n_age, τ_star, R_star, M_star, Vp_star
             )
 
             if Vp_cpm_val > Vp_star
@@ -216,24 +229,8 @@ function value_func(rng::AbstractRNG, params1c, params1n, params_all, n_c, n_age
         end 
     end
 
-    # Calculate and report first two moments for alpha and lambda parameters
-    mean_α_0 = mean(alpha_0_vals)
-    var_α_0 = std(alpha_0_vals)
-    mean_α_1 = mean(alpha_1_vals)
-    var_α_1 = std(alpha_1_vals)
-    mean_α_2 = mean(alpha_2_vals)
-    var_α_2 = std(alpha_2_vals)
-    
-    mean_λ_0 = mean(lambda_0_vals)
-    var_λ_0 = std(lambda_0_vals)
-    mean_λ_1 = mean(lambda_1_vals)
-    var_λ_1 = std(lambda_1_vals)
-    mean_λ_2 = mean(lambda_2_vals)
-    var_λ_2 = std(lambda_2_vals)
-    mean_λ_3 = mean(lambda_3_vals)
-    var_λ_3 = std(lambda_3_vals)
-
     return CPM_opt, τ_opt, M_opt, R_opt,
-    mean_α_0, var_α_0, mean_α_1, var_α_1, mean_α_2, var_α_2, mean_λ_0, var_λ_0, mean_λ_1, var_λ_1, mean_λ_2, var_λ_2, mean_λ_3, var_λ_3
+           mean(α_0_vec), std(α_0_vec), mean(α_1_vec), std(α_1_vec), mean(α_2_vec), std(α_2_vec),
+           mean(λ_0_vec), std(λ_0_vec), mean(λ_1_vec), std(λ_1_vec), mean(λ_2_vec), std(λ_2_vec), mean(λ_3_vec), std(λ_3_vec)
 
 end
