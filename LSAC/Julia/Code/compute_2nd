@@ -159,6 +159,17 @@ n_age = 3   # Length of Age
 α1λ1 = 0.008 # (20) Covariance between parent consumption and child leisure
 α1λ2 = 0.005  #(21) Covariance between parent consumption and child pocket money
 
+α01 = 0.051035714285714286 # (12) Covariance between child cognition and parent consumption
+λ01 = -0.1011904761904762 # (13) Covariance between child cognition and child leisure
+λ02 = 0.035714285714286 # (14) Covariance between child cognition and child pocket money
+λ12 = -0.07055714285714287 # (15) Covariance between child leisure and child pocket money
+α0λ0 = 0.051035714285714286 #(16) Covariance between child cognition and parent child cognition
+α0λ1 = -0.051011904761904762 # (17) Covariance between parent child cognition and child leisure
+α0λ2 = 0.051035714285714286  #(18) Covariance between parent child cognition and child pocket money
+α1λ0 = -0.051035714285714286 #(19) Covariance between parent consumption and child cognition
+α1λ1 = 0.0022142857142857146 # (20) Covariance between parent consumption and child leisure
+α1λ2 = 0.006309523809523809  #(21) Covariance between parent consumption and child pocket money
+
 params_all = [μ_α0, μ_α1, μ_λ0, μ_λ1, μ_λ2, σ_α0, σ_α1, σ_λ0, σ_λ1, σ_λ2, σ_ζ, α01, λ01, λ02, λ12, α0λ0, α0λ1, α0λ2, α1λ0, α1λ1, α1λ2]
 
 value_func(MersenneTwister(1234), params1c, params1n, params_all, n_c, n_age, s, Time, Y, CT, lito)
@@ -170,199 +181,120 @@ ReMatrix(GenAvgMoments(MersenneTwister(1234), params1c, params1n, params_all, df
 
 CT = zeros(n_c*n_age)
 
-#(1) Use only 1000 iterations to get better guesses of the parameters
+# Example usage:
 
-function objective_function(params1c, params1n, params_all, df_matrix)
-    
-    rng = MersenneTwister(1234) # Fixed seed for current iteration to ensure each optimizer iteration gets consistent random draws, but still reflects changes in parameters
-    # Call the Calibrate function, passing the parameters (which are now constrained)
-    return Calibrate(rng, params1c, params1n, params_all, df_matrix)
+# Compute weighting matrix using original data
+child_data = index_by_child(df_matrix_all, n_c)
+moment_vars = bootstrap_moment_variances_fast(child_data, n_c, n_age, 100)
+#moment_vars .+= 1e-8  # Add ridge for numerical stability
+W = Diagonal(1.0 ./ moment_vars)
+
+#distance_function(params1c, params1n, params_all, rng, df_matrix_all, W, n_c, n_age, s, Time, Y, CT)
+
+#obj(params) = distance_function(params1c, params1n, params, rng, df_matrix_all, W, n_c, n_age, s, Time, Y, CT)
+
+# Define initial parameter vector
+initial_params = copy(params_all)
+
+# Define objective
+rng = MersenneTwister(1234)
+obj(params) = distance_function(params1c, params1n, params, rng,
+                                df_matrix_all, W, n_c, n_age, s, Time, Y, CT)
+
+opt_options = Optim.Options(
+    iterations = 20000,
+    f_tol = 1e-4,
+    x_tol = 1e-4,
+    show_trace = true,
+    show_every = 1
+)
+
+# Set up bounds
+#n_params = length(initial_params)
+#lower_bounds = fill(-Inf, n_params)
+#upper_bounds = fill(Inf, n_params)
+
+# Set lower bound for σ_ζ (which is params[11])
+#lower_bounds[11] = 1e-6   # Enforces σ_ζ > 0
+
+# Perform constrained optimization
+result = Optim.optimize(
+  obj,
+  initial_params,
+  NelderMead(),
+  opt_options
+)
+
+# Update parameters
+params_all = Optim.minimizer(result)
+
+baseline_params_all = params_all
+baseline_results = value_func(MersenneTwister(1234), params1c, params1n, baseline_params_all, n_c, n_age, s, Time, Y, CT)
+
+derived_baseline = [
+    baseline_results[5], baseline_results[6],
+    baseline_results[7], baseline_results[8],
+    baseline_results[9], baseline_results[10],
+    baseline_results[11], baseline_results[12],
+    baseline_results[13], baseline_results[14],
+    baseline_results[15], baseline_results[16],
+    baseline_results[17], baseline_results[18]
+]
+println("Best parameters: ", baseline_params_all)
+println("Best derived_baseline: ", derived_baseline)
+
+opt_options_boot = Optim.Options(
+    iterations = 1000,
+    f_tol = 1e-4,
+    x_tol = 1e-4,
+    show_trace = true,
+    show_every = 1
+)
+
+params_boot, derived_boot = bootstrap_smm(child_data, params1c, params1n, baseline_params_all, 100, n_c, n_age, W, s, Time, Y, CT, opt_options_boot)
+
+CI_lower = mapslices(p -> quantile(p, 0.025), params_boot; dims=1)
+CI_upper = mapslices(p -> quantile(p, 0.975), params_boot; dims=1)
+
+for i in 1:length(param_names)
+    println("$(param_names[i]): Estimate = $(round(param_means[i], digits=4)) | 95% CI = [$(round(CI_lower[i], digits=4)), $(round(CI_upper[i], digits=4))]")
 end
 
-function objective_function_w(params1c, params1n, params_all, df_matrix)
-    
-    rng = MersenneTwister(1234) # Fixed seed for current iteration to ensure each optimizer iteration gets consistent random draws, but still reflects changes in parameters
-    # Call the Calibrate function, passing the parameters (which are now constrained)
-    return Calibrate_w(rng, params1c, params1n, params_all, df_matrix)
-end
+derived_CI_lower = mapslices(p -> quantile(p, 0.025), derived_boot; dims=1)
+derived_CI_upper = mapslices(p -> quantile(p, 0.975), derived_boot; dims=1)
 
-# Optimize using Nelder-Mead
-# Set the options
-opts = Optim.Options(
-    iterations = 1000,       # Maximum number of iterations
-    g_tol = 1e-6,           # Function tolerance (change in the function value)
-    show_trace = true,       # Show optimization progress
-)
-
-# Run the optimizer with Nelder-Mead method and the correct options
-result1 = optimize(
-    p -> objective_function_w(params1c, params1n, p, df_matrix_all),  # Objective function
-    params_all,  # Initial guess for the parameters
-    NelderMead(),  # Derivative-free method
-    opts   # Pass the options
-)
-
-# Retrieve the optimized parameters if notconverged within 1000 iterations
-parametervals = Optim.minimizer(result1)
-value_func(MersenneTwister(1234), params1c, params1n, parametervals, n_c, n_age, s, Time, Y, CT, lito)
-
-opts2 = Optim.Options(
-    iterations = 1000000000,       # Maximum number of iterations
-    g_tol = 1e-6,           # Function tolerance (change in the function value)
-    show_trace = true,       # Show optimization progress
-)
-
-# Call the optimization function
-result2 = optimize(
-    p -> objective_function_w(params1c, params1n, p, df_matrix_all),  # Objective function
-    parametervals,  # Initial guess for the parameters
-    NelderMead(),  # Derivative-free method
-    opts2   # Pass the options
-)
-
-result2 = optimize(
-    p -> objective_function(params1c, params1n, p, df_matrix_all),  # Objective function
-    params_all,  # Initial guess for the parameters
-    NelderMead(),  # Derivative-free method
-    opts2   # Pass the options
-)
-
-# Retrieve the (final) optimized parameters
-params_fin = Optim.minimizer(result2)
-
-individuals = unique(df_matrix_all[:, 1])  # Unique individuals
-num_params = length(parametervals)          # Number of parameters
-
-bootstrapped_params = zeros(100, num_params)
-
-for b in 1:100
-    # Generate bootstrap sample by sampling individuals with replacement
-    bootstrap_ids = sample(individuals, length(individuals), replace=true)
-
-    # Ensure all individuals present at least once:
-    missing_inds = setdiff(individuals, bootstrap_ids)
-    bootstrap_ids = vcat(bootstrap_ids, missing_inds)
-    
-    filtered_rows = filter(row -> in(row[1], bootstrap_ids), eachrow(df_matrix_all))
-    bootstrap_sample = reduce(vcat, [row' for row in filtered_rows])
-
-    # MDE on bootstrap sample
-    params_b = parametervals
-
-    result_b = optimize(
-            p -> objective_function_w(params1c, params1n, p, bootstrap_sample),
-            params_b,
-            NelderMead(),
-            Optim.Options(iterations=1000, g_tol=1e-6, show_trace=false)
-        )
-    
-    # Extract optimal parameters
-    paramas_bootstrap = Optim.minimizer(result_b)
-
-    # Store the estimated parameters for the bootstrap sample
-    bootstrapped_params[b, :] = paramas_bootstrap
-end
-
-individuals = unique(df_matrix_all[:, 1])  # Unique individuals
-num_params = length(parametervals)
-
-bootstrapped_params = zeros(100, num_params)
-
-for b in 1:100
-    # Sample individuals with replacement
-    bootstrap_ids = sample(individuals, length(individuals), replace=true)
-
-    # To avoid empty sample, ensure at least one copy of each individual
-    # (optional) but you can do that like this:
-    bootstrap_ids = union(bootstrap_ids, individuals)  # Force all present at least once
-
-    # Filter all rows for sampled individuals
-    filtered_rows = filter(row -> in(row[1], bootstrap_ids), eachrow(df_matrix_all))
-    bootstrap_sample = reduce(vcat, [row' for row in filtered_rows])
-
-    # If filtered_rows is empty (rare), skip iteration or handle error
-    if isempty(filtered_rows)
-        @warn "Empty bootstrap sample at iteration $b"
-        bootstrapped_params[b, :] .= NaN
-        continue
-    end
-
-    params_b = parametervals
-
-    try
-        result_b = optimize(
-            p -> objective_function_w(params1c, params1n, p, bootstrap_sample),
-            params_b,
-            NelderMead(),
-            Optim.Options(iterations=1000, g_tol=1e-6, show_trace=false)
-        )
-        params_bootstrap = Optim.minimizer(result_b)
-
-        if any(isnan, params_bootstrap)
-            bootstrapped_params[b, :] .= NaN
-        else
-            bootstrapped_params[b, :] .= params_bootstrap
-        end
-
-    catch e
-        bootstrapped_params[b, :] .= NaN
-        @warn "Optimization failed in bootstrap iteration $b: $e"
-    end
-end
-
-# Filter successful bootstrap samples
-valid_rows = findall(row -> all(.!isnan.(row)), eachrow(bootstrapped_params))
-param_boot_clean = bootstrapped_params[valid_rows, :]
-
-# 95% confidence intervals
-ci_lower = mapslices(p -> quantile(p, 0.025), param_boot_clean; dims=1)
-ci_upper = mapslices(p -> quantile(p, 0.975), param_boot_clean; dims=1)
-
-# Combine into readable output
-confidence_intervals = hcat(ci_lower', ci_upper')  # Each row: [lower upper] for a param
-
-# Display
-for (i, ci) in enumerate(eachrow(confidence_intervals))
-    println("Param $i: 95% CI = [", round(ci[1], digits=4), ", ", round(ci[2], digits=4), "]")
+for i in 1:length(derived_names)
+    println("$(derived_names[i]): Estimate = $(round(derived_means[i], digits=4)) | 95% CI = [$(round(derived_CI_lower[i], digits=4)), $(round(derived_CI_upper[i], digits=4))]")
 end
 
 # Save results
 
-flatten_params_fin = vcat(parametervals...)
+flatten_params_fin = vcat(baseline_params_all...)
 df_params_fin = DataFrame(estimated_params_fin = flatten_params_fin)
 
 # Save to CSV
 CSV.write("params_fin.csv", df_params_fin)
-
-#result3 = optimize(objective_function, params_fin, NelderMead())
-#params_temp = Optim.minimizer(result3)
-#sim_data = Simulate(params_temp, n_c, n_age, Ep, s, Time, df_matrix) 
-#sim_moments = ReMatrix(GenAvgMoments(params_temp, df_matrix)) 
 
 # ==============================================================================
 # 2. Model Fit
 # ------------------------------------------------------------------------------
 
 # Generate true data moments
-true_moments = ReMatrix(GenMoments(df_matrix_all))
-true_moments_est = ReMatrix_est(GenMoments_est(df_matrix_all))
+true_moments = data_moments(df_matrix_all, n_age)
+println("true_moments: ", true_moments)
 
-sim_moments = ReMatrix(GenAvgMoments(MersenneTwister(1234), params1c, params1n, params_fin, df_matrix_all))
-sim_moments = ReMatrix(GenAvgMoments(MersenneTwister(1234), params1c, params1n, parametervals, df_matrix_all))
-sim_moments_est = ReMatrix_est(GenAvgMoments_est(MersenneTwister(1234), params1c, params1n, parametervals, df_matrix_all))
-#sim_moments = ReMatrix(GenAvgMoments(params1, params2, df_matrix2))
+results = value_func(MersenneTwister(1234), params1c, params1n, params_all, n_c, n_age, s, Time, Y, CT)
+ M_opt, CPM_opt, τ_opt, R_opt = results[3], results[1], results[2], results[4]
+sim_moments = simulated_moments(CPM_opt, τ_opt, R_opt, M_opt, df_matrix_all)
+println("sim_moments: ", sim_moments)
 
 using CSV
 
 # Assuming true_moments and sim_moments are vectors of vectors
 # Flatten the vectors
-flatten_true_moments_est = vcat(true_moments_est...)
-#data_mom_temp = DataFrame(true_moments = flatten_true_moments)
-#CSV.write("data_mom_temp.csv", data_mom_temp)
+flatten_true_moments_est = vcat(true_moments...)
 
-flatten_sim_moments_est = vcat(sim_moments_est...)
-#model_mom_temp = DataFrame(sim_moments = flatten_sim_moments)
-#CSV.write("model_mom_temp.csv", model_mom_temp)
+flatten_sim_moments_est = vcat(sim_moments...)
 
 # Combine them into a 2-column DataFrame
 df_moments = DataFrame(true_moments_est = flatten_true_moments_est, sim_moments_est = flatten_sim_moments_est)
@@ -374,23 +306,28 @@ CSV.write("moments_data.csv", df_moments)
 # 3. Counterfactual Policies
 # ------------------------------------------------------------------------------
 
-# (A) CPM Adoption Change
+# (A) Quantify CPM Effect
 
-cf_result = GenAvgMoments_cf(params1c, params1n, parametervals, df_matrix_all)
-println(cf_result)
+# (B) CPM Adoption Change
+
+CTb = zeros(n_c*n_age)
+CT1 = zeros(n_c*n_age)
+CT2 = zeros(n_c*n_age)
+for i=1:(n_c*n_age)
+    CT1[i] = 100
+    CT2[i] = Y[i]*0.1
+end
+
+cf_result_b = cf_cpm(MersenneTwister(1234), params1c, params1n, baseline_params_all, n_c, n_age, s, Time, Y, CTb)
+cf_result_ct1 = cf_cpm(MersenneTwister(1234), params1c, params1n, baseline_params_all, n_c, n_age, s, Time, Y, CT1)
+cf_result_ct2 = cf_cpm(MersenneTwister(1234), params1c, params1n, baseline_params_all, n_c, n_age, s, Time, Y, CT2)
+println("cf_result_b: ", cf_result_b)
+println("cf_result_ct1:", cf_result_ct1)
+println("cf_result_ct2: ", cf_result_ct2)
 
 # Inequality
 cf_gap_result = GenAvgMoments_gap(params1, params_fin, df_matrix2, Y)
 println(cf_gap_result)
-
-# CCT
-Y_new = cct(n_c, n_age, Y, df_matrix2)
-df_matrix_new = copy(df_matrix2)  # avoid modifying original
-df_matrix_new[:, 8] = Y_new
-df_matrix_new[:, 13] = 0.16*Y_new
-
-cf_cct_result = GenAvgMoments_gap(params1, params_fin, df_matrix_new, Y_new)
-println(cf_cct_result)
 
 
 
@@ -477,4 +414,5 @@ end
 results_se_df = DataFrame(parameter=params_fin, standard_error=standard_errors, 
     ci_lower=ci_lower, ci_upper=ci_upper)
 CSV.write("bootstrap_results.csv", results_se_df)
+
 
