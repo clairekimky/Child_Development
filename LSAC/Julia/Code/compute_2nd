@@ -416,3 +416,51 @@ results_se_df = DataFrame(parameter=params_fin, standard_error=standard_errors,
 CSV.write("bootstrap_results.csv", results_se_df)
 
 
+# ==============================================================================
+# 4. Bootstrapped Confidence Intervals
+# ------------------------------------------------------------------------------
+
+opt_options_boot = Optim.Options(
+    iterations = 1000,
+    f_tol = 1e-4,
+    x_tol = 1e-4,
+    show_trace = true,
+    show_every = 1
+)
+
+params_boot, derived_boot = bootstrap_smm(child_data, params1c, params1n, baseline_params_all, 100, n_c, n_age, W, s, Time, Y, CT, opt_options_boot)
+
+CI_lower = mapslices(p -> quantile(p, 0.025), params_boot; dims=1)
+CI_upper = mapslices(p -> quantile(p, 0.975), params_boot; dims=1)
+
+for i in 1:length(param_names)
+    println("$(param_names[i]): Estimate = $(round(param_means[i], digits=4)) | 95% CI = [$(round(CI_lower[i], digits=4)), $(round(CI_upper[i], digits=4))]")
+end
+
+derived_CI_lower = mapslices(p -> quantile(p, 0.025), derived_boot; dims=1)
+derived_CI_upper = mapslices(p -> quantile(p, 0.975), derived_boot; dims=1)
+
+for i in 1:length(derived_names)
+    println("$(derived_names[i]): Estimate = $(round(derived_means[i], digits=4)) | 95% CI = [$(round(derived_CI_lower[i], digits=4)), $(round(derived_CI_upper[i], digits=4))]")
+end
+
+
+# For parameters
+df_params_CI = DataFrame(
+    param_name = param_names,
+    estimate = param_means,
+    CI_lower = vec(CI_lower),  # flatten dims if necessary
+    CI_upper = vec(CI_upper)
+)
+
+CSV.write("params_bootstrap_CI.csv", df_params_CI)
+
+# For derived statistics
+df_derived_CI = DataFrame(
+    derived_name = derived_names,
+    estimate = derived_means,
+    CI_lower = vec(derived_CI_lower),
+    CI_upper = vec(derived_CI_upper)
+)
+
+CSV.write("derived_bootstrap_CI.csv", df_derived_CI)
