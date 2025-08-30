@@ -253,15 +253,15 @@ opt_options_boot = Optim.Options(
 
 params_boot, derived_boot = bootstrap_smm(child_data, params1c, params1n, baseline_params_all, 100, n_c, n_age, W, s, Time, Y, CT, opt_options_boot)
 
-CI_lower = mapslices(p -> quantile(p, 0.025), params_boot; dims=1)
-CI_upper = mapslices(p -> quantile(p, 0.975), params_boot; dims=1)
+CI_lower = mapslices(p -> quantile(skipmissing(p), 0.025), params_boot; dims=1)
+CI_upper = mapslices(p -> quantile(skipmissing(p), 0.975), params_boot; dims=1)
 
 for i in 1:length(param_names)
     println("$(param_names[i]): Estimate = $(round(param_means[i], digits=4)) | 95% CI = [$(round(CI_lower[i], digits=4)), $(round(CI_upper[i], digits=4))]")
 end
 
-derived_CI_lower = mapslices(p -> quantile(p, 0.025), derived_boot; dims=1)
-derived_CI_upper = mapslices(p -> quantile(p, 0.975), derived_boot; dims=1)
+derived_CI_lower = mapslices(p -> quantile(skipmissing(p), 0.025), derived_boot; dims=1)
+derived_CI_upper = mapslices(p -> quantile(skipmissing(p), 0.975), derived_boot; dims=1)
 
 for i in 1:length(derived_names)
     println("$(derived_names[i]): Estimate = $(round(derived_means[i], digits=4)) | 95% CI = [$(round(derived_CI_lower[i], digits=4)), $(round(derived_CI_upper[i], digits=4))]")
