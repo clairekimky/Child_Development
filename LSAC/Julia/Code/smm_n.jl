@@ -1,116 +1,195 @@
-using DataFrames, Statistics, LinearAlgebra
+using DataFrames, Statistics
 using Statistics, Random, Optim
 using Base.Threads
 
 function data_moments(df, n_age)
 
     # Helper: Get mean and std for a variable conditional on CPM and child age
-    function mean_std_by_cpm_age(df, var_col::Int)
+    function mean_std_by_age(df, var_col::Int)
         means = Float64[]
         stds = Float64[]
-        for cpm in (0, 1), age in 1:n_age
-            idx = (df[:, var_col] .!= -999) .& (df[:, 4] .== cpm) .& (df[:, 2] .== age)
-            push!(means, mean(df[idx, var_col]))
-            push!(stds, std(df[idx, var_col], corrected=true))
+        for age in 1:n_age            
+            idx = (df[:, var_col] .!= -999) .& (df[:, 2] .== age)
+            if any(idx)
+                values = df[idx, var_col]
+                push!(means, isempty(values) ? 0.0 : mean(values))
+                push!(stds, length(values) <= 1 ? 0.0 : std(values, corrected=true))
+            else
+                push!(means, 0.0)
+                push!(stds, 0.0)
+            end
         end
         return means, stds
     end
 
-    # 1. τ (col 8): Study time
-    τ_means, τ_stds = mean_std_by_cpm_age(df, 7)
+    read_means, read_stds = mean_std_by_age(df, 10)
+    hyp_means, hyp_stds = mean_std_by_age(df, 11)
+    CPM_mean_age = mean_std_by_age(df, 4)[1]
 
-    # 2. R (col 10)
-    R_means, R_stds = mean_std_by_cpm_age(df, 9)
+    # Time investment by CPM × age × school indicator (mean + std)
+    time_by_cpm_age = Float64[]
+    time_sd_by_cpm_age = Float64[]
+    for cpm in (0, 1)
+        for age in 1:n_age
+            idx = (df[:, 7] .> 0.0) .& (df[:, 4] .== cpm) .& (df[:, 2] .== age)
+            if any(idx)
+                values = df[idx, 7]
+                push!(time_by_cpm_age, mean(values))
+                push!(time_sd_by_cpm_age, length(values) <= 1 ? 0.0 : std(values, corrected=true))
+            else
+                push!(time_by_cpm_age, 0.0)
+                push!(time_sd_by_cpm_age, 0.0)
+            end
+        end
+    end
 
-    # 3. M (col 11)
-    #M_means, M_stds = mean_std_by_cpm_age(df, 10)
+    # Pocket Money by CPM × age (mean + std)
+    R_by_cpm_age = Float64[]
+    R_sd_by_cpm_age = Float64[]
+    for cpm in (0, 1)
+        for age in 1:n_age
+            #idx = (df[:, 8] .!= -999) .& (df[:, 4] .== cpm) .& (df[:, 2] .== age)
+            idx = (df[:, 8] .> 0) .& (df[:, 4] .== cpm) .& (df[:, 2] .== age)
+            if any(idx)
+                values = df[idx, 8]  # pocket money / income
+                push!(R_by_cpm_age, mean(values))
+                push!(R_sd_by_cpm_age, length(values) <= 1 ? 0.0 : std(values, corrected=true))
+            else
+                push!(R_by_cpm_age, 0.0)
+                push!(R_sd_by_cpm_age, 0.0)
+            end
+        end
+    end
 
-    # 4. Mean CPM (col 5) overall and by age
-    CPM_mean_all = mean(df[df[:, 4] .!= -999, 4])
-    CPM_mean_age = [
-        mean(df[(df[:, 4] .!= -999) .& (df[:, 2] .== age), 4]) for age in 1:n_age
-    ]
+    # Time Trend
+    τ_diff_no_cpm = diff(time_by_cpm_age[1:3])
+    τ_diff_cpm = diff(time_by_cpm_age[4:6])
+    R_diff_no_cpm = diff(R_by_cpm_age[1:3])
+    R_diff_cpm = diff(R_by_cpm_age[4:6])
 
     # 5. Correlations
-    corr1 = cor(df[(df[:, 4] .!= -999) .& (df[:, 3] .!= -999), 4], df[(df[:, 4] .!= -999) .& (df[:, 3] .!= -999), 3])
-    corr2 = cor(df[(df[:, 4] .!= -999) .& (df[:, 8] .!= -999), 4], df[(df[:, 4] .!= -999) .& (df[:, 8] .!= -999), 8])
-    corr3 = cor(df[(df[:, 4] .!= -999) .& (df[:, 7] .!= -999), 4], df[(df[:, 4] .!= -999) .& (df[:, 7] .!= -999), 7])
+    #valid_idx1 = (df[:, 4] .!= -999) .& (df[:, 3] .!= -999) # Mother's education
+    #valid_idx2 = (df[:, 4] .!= -999) .& (df[:, 2] .!= -999) # Child's age
+    #valid_idx3 = (df[:, 4] .!= -999) .& (df[:, 7] .!= -999) # Study Time
+    #valid_idx4 = (df[:, 4] .!= -999) .& (df[:, 10] .!= -999) # Test Scores
 
-    # Combine all moments into one vector (43 total)
+    #corr1 = any(valid_idx1) ? cor(df[valid_idx1, 4], df[valid_idx1, 3]) : 0.0
+    #corr2 = any(valid_idx2) ? cor(df[valid_idx2, 4], df[valid_idx2, 2]) : 0.0
+    #corr3 = any(valid_idx3) ? cor(df[valid_idx3, 4], df[valid_idx3, 7]) : 0.0
+    #corr4 = any(valid_idx4) ? cor(df[valid_idx4, 4], df[valid_idx4, 10]) : 0.0
+
+    # Combine all moments into one vector (56 total)
     moments = vcat(
-        τ_means..., τ_stds...,       # 1–12
-        R_means..., R_stds...,       # 13–24
-        #M_means..., M_stds...,       # 25–36
-        CPM_mean_all, CPM_mean_age...,  # 37–40
-        corr1, corr2, corr3          # 41–43
+        #τ_means..., τ_stds...,       # 25–36
+        time_by_cpm_age..., time_sd_by_cpm_age...,       # 1–12
+        #R_means..., R_stds...,       # 37 - 48
+        R_by_cpm_age..., R_sd_by_cpm_age...,       # 13–24
+        read_means..., read_stds...,       # 25–30
+        hyp_means..., hyp_stds...,       # 31 - 36
+        CPM_mean_age...,  # 37 – 39
+        τ_diff_no_cpm, τ_diff_cpm,
+        R_diff_no_cpm, R_diff_cpm
+        #corr1, corr2          # 40–41
     )
 
     return moments
 end
 
-function simulated_moments(CPM_opt, τ_opt, R_opt, M_opt, df)
-    # Flatten the arrays to vectors for easy indexing
-    CPM_vec = vec(CPM_opt)
-    τ_vec = vec(τ_opt)
-    R_vec = vec(R_opt)
-    M_vec = vec(M_opt)
+function simulated_moments(params1c, params1n, CPM_opt, τ_opt, R_opt, M_opt, df, n_c, n_age)
+    # --- Safe helpers ---
+    safe_mean(x) = isempty(skipmissing(x)) ? NaN : mean(skipmissing(x))
+    safe_std(x)  = length(collect(skipmissing(x))) <= 1 ? 0.0 : std(collect(skipmissing(x)), corrected=true)
+    
+    # Initialize matrices
+    Z_C = zeros(n_c, n_age)
+    Z_N = zeros(n_c, n_age)
 
-    n_c, n_age = size(CPM_opt)
-    time_vec = repeat(1:n_age, n_c)
+    # --- Period 1: match data moments ---
+    Z_C[:, 1] .= df[df[:, 2] .== 1, 10]
+    Z_N[:, 1] .= df[df[:, 2] .== 1, 11]
 
-    # Extract exogenous variables from original data
-    cage_vec = df[:, 3]  # Child's actual age
-    medu_vec = df[:, 8]  # Mother's education
+    # Flatten arrays for CPM, τ, R, M (no filtering, assume R_vec has no zeros)
+    CPM_vec  = vec(CPM_opt)
+    τ_vec    = vec(τ_opt)
+    R_vec    = vec(R_opt)
+    M_vec    = vec(M_opt)
+    time_vec = repeat(1:n_age, inner=n_c)  # still required for CPM/τ moments
 
-    # 1. τ (study time): mean and std by CPM and child age
-    τ_means = Float64[]
-    τ_stds = Float64[]
-    for cpm in (0, 1), age in 1:n_age
-        idx = (CPM_vec .== cpm) .& (time_vec .== age)
-        push!(τ_means, mean(τ_vec[idx]))
-        push!(τ_stds, std(τ_vec[idx], corrected=true))
+    # Extract medu and income per child and broadcast over time efficiently
+    #medu_vec   = repeat(df[1:n_c, 3], inner=n_age)
+    income_vec = repeat(df[1:n_c, 5], inner=n_age)
+
+    # Valid mask for filtering
+    #valid_mask = repeat(child_valid, inner=n_age)
+    #CPM_vec     = CPM_vec[valid_mask]
+    #τ_vec       = τ_vec[valid_mask]
+    #R_vec       = R_vec[valid_mask]
+    #M_vec       = M_vec[valid_mask]
+    #time_vec    = time_vec[valid_mask]
+    #medu_vec    = medu_vec[valid_mask]
+    #income_vec  = income_vec[valid_mask]
+
+    # Simulate skill evolution
+    @inbounds for t in 2:n_age
+        Z_C[:, t] .= exp.(params1c[(t-1)*5-4] .+ params1c[(t-1)*5-3]*log.(Z_C[:, t-1]) .+ 
+                        params1c[(t-1)*5-2]*log.(τ_opt[:, t-1]) .+ 
+                        params1c[(t-1)*5-1]*log.(M_opt[:, t-1]) .+ 
+                        params1c[(t-1)*5]*log.(Z_N[:, t-1]))
+        Z_N[:, t] .= exp.(params1n[(t-1)*5-4] .+ params1n[(t-1)*5-3]*log.(Z_N[:, t-1]) .+
+                        params1n[(t-1)*5-2]*log.(τ_opt[:, t-1]) .+ 
+                        params1n[(t-1)*5-1]*log.(M_opt[:, t-1]) .+
+                        params1n[(t-1)*5]*log.(Z_C[:, t-1]))
     end
 
-    # 2. R: mean and std by CPM and child age
-    R_means = Float64[]
-    R_stds = Float64[]
-    for cpm in (0, 1), age in 1:n_age
-        idx = (CPM_vec .== cpm) .& (time_vec .== age)
-        push!(R_means, mean(R_vec[idx]))
-        push!(R_stds, std(R_vec[idx], corrected=true))
-    end
+    # --- Compute Z_C/Z_N means per age ---
+    Z_C_means = [mean(Z_C[:, age]) for age in 1:n_age]
+    Z_C_stds  = [std(Z_C[:, age])  for age in 1:n_age]
+    Z_N_means = [mean(Z_N[:, age]) for age in 1:n_age]
+    Z_N_stds  = [std(Z_N[:, age])  for age in 1:n_age]
 
-    # 3. M: mean and std by CPM and child age
-    #M_means = Float64[]
-    #M_stds = Float64[]
-    #for cpm in (0, 1), age in 1:n_age
-    #    idx = (CPM_vec .== cpm) .& (time_vec .== age)
-    #    push!(M_means, mean(M_vec[idx]))
-    #    push!(M_stds, std(M_vec[idx], corrected=true))
-    #end
+    # --- Compute CPM/τ/R moments ---
+    CPM_mean_age = [mean(CPM_vec[time_vec .== age]) for age in 1:n_age]
 
-    # 4. Mean CPM overall and by child age
-    CPM_mean_all = mean(CPM_vec)
-    CPM_mean_age = [
-        mean(CPM_vec[time_vec .== age]) for age in 1:n_age
-    ]
+    # --- Vectorized τ moments ---
+    τ_by_cpm_age     = [mean(τ_vec[(CPM_vec .== c) .& (time_vec .== a)]) for c in (0,1) for a in 1:n_age]
+    τ_sd_by_cpm_age  = [std(τ_vec[(CPM_vec .== c) .& (time_vec .== a)]) for c in (0,1) for a in 1:n_age]
+    R_by_cpm_age     = [mean(R_vec[(CPM_vec .== c) .& (time_vec .== a) .& (R_vec .> 0)]) for c in (0,1) for a in 1:n_age]
+    R_sd_by_cpm_age  = [std(R_vec[(CPM_vec .== c) .& (time_vec .== a) .& (R_vec .> 0)]) for c in (0,1) for a in 1:n_age]
+    
+    # --- Vectorized R moments ---
+    #R_vals_mat = 100 .* R_vec ./ income_vec
 
-    # 5. Correlations with exogenous variables
-    valid1 = (CPM_vec .!= -999) .& (cage_vec .!= -999)
-    valid2 = (CPM_vec .!= -999) .& (medu_vec .!= -999)
-    valid3 = (CPM_vec .!= -999) .& (τ_vec .!= -999)
+    #R_by_cpm_age = [
+    #    mean(R_vals_mat[(CPM_vec .== c) .& (time_vec .== a) .& (R_vec .>= 0)])
+    #    for c in (0, 1), a in 1:n_age
+    #]
 
-    corr1 = cor(CPM_vec[valid1], cage_vec[valid1])
-    corr2 = cor(CPM_vec[valid2], medu_vec[valid2])
-    corr3 = cor(CPM_vec[valid3], τ_vec[valid3])
+    #R_sd_by_cpm_age = [
+    #    std(R_vals_mat[(CPM_vec .== c) .& (time_vec .== a) .& (R_vec .>= 0)])
+    #    for c in (0, 1), a in 1:n_age
+    #]
 
-    # Combine all 43 moments in correct order
+    # Time Trend
+    τ_diff_no_cpm = diff(τ_by_cpm_age[1:3])
+    τ_diff_cpm = diff(τ_by_cpm_age[4:6])
+    R_diff_no_cpm = diff(R_by_cpm_age[1:3])
+    R_diff_cpm = diff(R_by_cpm_age[4:6])
+
+    # --- Correlations ---
+    #valid1 = (medu_vec .!= -999)
+    #corr1 = cor(CPM_vec[valid1], medu_vec[valid1])
+    #corr2 = cor(CPM_vec, time_vec)
+
+    # --- Combine moments ---
     moments = vcat(
-        τ_means..., τ_stds...,       # 1–12
-        R_means..., R_stds...,       # 13–24
-        #M_means..., M_stds...,       # 25–36
-        CPM_mean_all, CPM_mean_age...,  # 37–40
-        corr1, corr2, corr3          # 41–43
+        τ_by_cpm_age..., τ_sd_by_cpm_age...,
+        R_by_cpm_age..., R_sd_by_cpm_age...,
+        Z_C_means..., Z_C_stds...,
+        Z_N_means..., Z_N_stds...,
+        CPM_mean_age...,  # 37 – 39
+        τ_diff_no_cpm, τ_diff_cpm,
+        R_diff_no_cpm, R_diff_cpm
+        #corr1, corr2
     )
 
     return moments
@@ -124,57 +203,65 @@ function index_by_child(df, n_c)
     return child_data
 end
 
-function bootstrap_moment_variances_fast(child_data, n_c, n_age, n_boot=100)
+# Compute bootstrapped standard deviations for moments
+function bootstrap_moment_std(child_data, n_c, n_age, n_boot=100)
     n_moments = length(data_moments(vcat(child_data...), n_age))
     moment_samples = zeros(n_boot, n_moments)
 
-    Threads.@threads for i in 1:n_boot
-        sample_cids = rand(1:n_c, n_c)
-        df_sample_mat = vcat(child_data[sample_cids]...)
-        moment_samples[i, :] = data_moments(df_sample_mat, n_age)
+    Threads.@threads for b in 1:n_boot
+        sample_cids = rand(1:n_c, n_c)              # resample children with replacement
+        df_sample = vcat(child_data[sample_cids]...)  # concatenate matrices
+        try
+            moment_samples[b, :] = data_moments(df_sample, n_age)
+        catch e
+            println("Bootstrap iteration $b failed, filling with zeros.")
+            moment_samples[b, :] .= 0.0
+        end
     end
 
-    moment_vars = var(moment_samples; dims=1, corrected=true)
-    return vec(moment_vars)
+    # Compute standard deviations of each moment
+    moment_std = std(moment_samples; dims=1, corrected=true)
+    return vec(moment_std)
 end
 
-function distance_function(params1c, params1n, params, rng, df, W, n_c, n_age, s, Time, Y, CT)
-    println("Starting optimization process...")
+function distance_function_optimized(
+    params1c, params1n, params, W, n_c, n_age,
+    s, Time, Y, CT, Z, emp_moms, df
+)
+    BIG_PENALTY = 1e10  # large but finite
 
-    results = value_func(rng, params1c, params1n, params, n_c, n_age, s, Time, Y, CT)
-    CPM_opt, τ_opt, M_opt, R_opt = results[1], results[2], results[3], results[4]
+    try
+        # Single call to value function
+        results = value_func(Z, params1c, params1n, params, n_c, n_age, s, Time, Y, CT, R_bar)
+        CPM_opt, τ_opt, M_opt, R_opt = results[1:4]
 
-    sim_moms = simulated_moments(CPM_opt, τ_opt, R_opt, M_opt, df)
-    println("Simulated Moments: ", sim_moms)
-    emp_moms = data_moments(df, n_age)
-    #println("Data Moments: ", emp_moms)
+        # Compute simulated moments
+        sim_moms = simulated_moments(params1c, params1n, CPM_opt, τ_opt, R_opt, M_opt, df, n_c, n_age)
 
-    # Early return if moments contain NaNs or Infs
-    if any(isnan, sim_moms) || any(isinf, sim_moms) ||
-       any(isnan, emp_moms) || any(isinf, emp_moms)
-       #println("Error: Moments contain NaN or Inf values.")
-        return Inf
+        # Check for NaN/Inf early
+        if any(isnan, sim_moms) || any(isinf, sim_moms)
+            return BIG_PENALTY
+        end
+
+        # Compute weighted squared difference
+        # Use @. to avoid repeated allocations
+        diff = sim_moms .- emp_moms
+        if any(isnan, diff) || any(isinf, diff)
+            return BIG_PENALTY
+        end
+
+        loss = sum(W.diag .* diff.^2)
+        return isnan(loss) || isinf(loss) ? BIG_PENALTY : loss
+
+    catch e
+        println("‼️ Exception in distance_function: ", e)
+        return BIG_PENALTY
     end
-
-    diff = sim_moms .- emp_moms
-
-    # Early return if differences or weight matrix have NaN/Inf
-    if any(isnan, diff) || any(isinf, diff) ||
-       any(isnan, W.diag) || any(isinf, W.diag)
-       #println("Error: Differences or weight matrix contain NaN or Inf values.")
-        return Inf
-    end
-
-    dist = diff' * W * diff
-
-    println("Updated Error: ", dist)
-
-    return isnan(dist) || isinf(dist) ? Inf : dist
 end
 
 function bootstrap_smm(child_data, params1c, params1n, initial_params,
                        n_boot, n_c, n_age, W,
-                       s, Time, Y, CT, opt_options_boot)
+                       s, Time, Y, CT, Z, U)
 
     n_params = length(initial_params)
     n_derived = 14  # mean/var for α and λ
@@ -182,32 +269,202 @@ function bootstrap_smm(child_data, params1c, params1n, initial_params,
     all_params_boot = Matrix{Float64}(undef, n_boot, n_params)
     all_derived_boot = Matrix{Float64}(undef, n_boot, n_derived)
 
+    # Identify unique child units (assuming :child_id exists)
+    child_ids = unique(child_data[:, 1])
+    n_childs = length(child_ids)
+
     for b in 1:n_boot
-        # Use a fixed seed for the RNG to ensure consistent random draws for each bootstrap iteration
-        rng = MersenneTwister(1234)  # Fix the seed for reproducibility
+        println("Bootstrap iteration $b / $n_boot")
 
-        boot_ids = rand(rng, 1:n_c, n_c)
-        df_boot = vcat(child_data[boot_ids]...)
+        # --- resample households with replacement (reproducible per b)
+        rng_boot = MersenneTwister(4321 + b)
+        boot_ids = rand(rng_boot, child_ids, n_childs)
+        df_boot  = vcat([child_data[child_data[:, 1] .== id, :] for id in boot_ids]...)
 
-        obj(params) = distance_function(params1c, params1n, params, rng, df_boot, W, n_c, n_age, s, Time, Y, CT)
+        # --- Step 2: Objective function for this bootstrap
+        function bootstrap_obj(params)
+            error = distance_function_optimized(
+                params1c, params1n, params, W, n_c, n_age,
+                s, Time, Y, CT, Z, emp_moms, df_boot
+            )
+                        
+            return isnan(error) || isinf(error) ? 1e10 : error
+        end
 
-        result = optimize(obj, initial_params, NelderMead(), opt_options_boot)
-        boot_params = Optim.minimizer(result)
+        # objective for this bootstrap
+        bootstrap_obj = params -> begin
+            err = distance_function_optimized(params1c, params1n, params,
+                                              df_boot, W_boot, n_c, n_age, s, Time, Y, CT, Z, U, emp_moms)
+            (isnan(err) || isinf(err)) ? 1e10 : err
+        end
+
+        # --- Differential Evolution (trimmed) to avoid anchoring
+        de_res = bboptimize(bootstrap_obj;
+            SearchRange = bounds,
+            Method = :adaptive_de_rand_1_bin,
+            NumDimensions = length(initial_params),
+            PopulationSize = 150,
+            MaxSteps = 10000,
+            MaxStepsWithoutProgress = 500,
+            FitnessTolerance = 1e-4,
+            MinDeltaFitnessTolerance = 1e-4,
+            TraceMode = :verbose
+        )
+
+        # seed NM with DE minimizer
+        start_nm = best_candidate(de_res)  # or de_res.archive_best_candidate.x
+
+        nm_res = Optim.optimize(
+            bootstrap_obj,
+            start_nm,
+            NelderMead(),
+            Optim.Options(
+                iterations = 50000,
+                f_tol = 1e-6,
+                x_tol = 1e-6,
+                show_trace = true
+        ))
+
+        boot_params = Optim.minimizer(nm_res)
         all_params_boot[b, :] .= boot_params
 
-        # Derived parameters from value_func
-        results = value_func(rng, params1c, params1n, boot_params, n_c, n_age, s, Time, Y, CT)
-
-        all_derived_boot[b, :] .= [
-            results[5], results[6],
-            results[7], results[8],
-            results[9], results[10],
-            results[11], results[12],
-            results[13], results[14],
-            results[15], results[16],
-            results[17], results[18]
-        ]
+        # derived quantities
+        vr = value_func(Z, U, params1c, params1n, boot_params, n_c, n_age, s, Time, Y, CT)
+        all_derived_boot[b, :] .= (vr[5:18])  # adjust if indices differ
     end
 
     return all_params_boot, all_derived_boot
+end
+
+function key_data_moms(df, n_age)
+
+    # Helper: Get mean and std for a variable conditional on CPM and child age
+    function mean_std_by_age(df, var_col::Int)
+        means = Float64[]
+        stds = Float64[]
+        for age in 1:n_age            
+            idx = (df[:, var_col] .!= -999) .& (df[:, 2] .== age)
+            if any(idx)
+                values = df[idx, var_col]
+                push!(means, isempty(values) ? 0.0 : mean(values))
+                push!(stds, length(values) <= 1 ? 0.0 : std(values, corrected=true))
+            else
+                push!(means, 0.0)
+                push!(stds, 0.0)
+            end
+        end
+        return means, stds
+    end
+
+    τ_means, τ_stds = mean_std_by_age(df, 7)
+    read_means, read_stds = mean_std_by_age(df, 10)
+    hyp_means, hyp_stds = mean_std_by_age(df, 11)
+    CPM_mean_age = mean_std_by_age(df, 4)[1] * 100
+
+    # Pocket Money by CPM × age (mean + std)
+    R_share_by_age = Float64[]
+    R_share_sd_by_age = Float64[]
+    for age in 1:n_age
+        idx = (df[:, 8] .> 0.0) .& (df[:, 2] .== age)
+        if any(idx)
+            values = 100 * df[idx, 8] ./ df[idx, 5]  # pocket money / income
+            push!(R_share_by_age, mean(values))
+            push!(R_share_sd_by_age, length(values) <= 1 ? 0.0 : std(values, corrected=true))
+        else
+            push!(R_share_by_age, 0.0)
+            push!(R_share_sd_by_age, 0.0)
+        end
+    end
+
+    # 5. Correlations
+    #valid_idx1 = (df[:, 4] .!= -999) .& (df[:, 3] .!= -999) # Mother's education
+    #valid_idx2 = (df[:, 4] .!= -999) .& (df[:, 2] .!= -999) # Child's age
+    #valid_idx3 = (df[:, 4] .!= -999) .& (df[:, 7] .!= -999) # Study Time
+    #valid_idx4 = (df[:, 4] .!= -999) .& (df[:, 10] .!= -999) # Test Scores
+
+    #corr1 = any(valid_idx1) ? cor(df[valid_idx1, 4], df[valid_idx1, 3]) : 0.0
+    #corr2 = any(valid_idx2) ? cor(df[valid_idx2, 4], df[valid_idx2, 2]) : 0.0
+    #corr3 = any(valid_idx3) ? cor(df[valid_idx3, 4], df[valid_idx3, 7]) : 0.0
+    #corr4 = any(valid_idx4) ? cor(df[valid_idx4, 4], df[valid_idx4, 10]) : 0.0
+
+    # Combine all moments into one vector (56 total)
+    moments = vcat(
+        τ_means..., τ_stds...,       # 25–36
+        R_share_by_age..., R_share_sd_by_age...,       # 13–24
+        read_means..., read_stds...,       # 25–30
+        hyp_means..., hyp_stds...,       # 31 - 36
+        CPM_mean_age...
+    )
+
+    return moments
+end
+
+function key_sim_moms(params1c, params1n, CPM_opt, τ_opt, R_opt, M_opt, df, n_c, n_age)
+    # --- Safe helpers ---
+    safe_mean(x) = isempty(skipmissing(x)) ? NaN : mean(skipmissing(x))
+    safe_std(x)  = length(collect(skipmissing(x))) <= 1 ? 0.0 : std(collect(skipmissing(x)), corrected=true)
+    
+    # Initialize matrices
+    Z_C = zeros(n_c, n_age)
+    Z_N = zeros(n_c, n_age)
+
+    # --- Period 1: match data moments ---
+    Z_C[:, 1] .= df[df[:, 2] .== 1, 10]
+    Z_N[:, 1] .= df[df[:, 2] .== 1, 11]
+
+    # Extract medu and income per child and broadcast over time efficiently
+    CPM_vec  = vec(CPM_opt)
+    τ_vec    = vec(τ_opt)
+    R_vec    = vec(R_opt)
+    M_vec    = vec(M_opt)
+    time_vec = repeat(1:n_age, inner=n_c)  # still required for CPM/τ moments
+    medu_vec   = repeat(df[1:n_c, 3], inner=n_age)
+    income_vec = repeat(df[1:n_c, 5], inner=n_age)
+
+    # Simulate skill evolution
+    @inbounds for t in 2:n_age
+        Z_C[:, t] .= exp.(params1c[(t-1)*5-4] .+ params1c[(t-1)*5-3]*log.(Z_C[:, t-1]) .+ 
+                        params1c[(t-1)*5-2]*log.(τ_opt[:, t-1]) .+ 
+                        params1c[(t-1)*5-1]*log.(M_opt[:, t-1]) .+ 
+                        params1c[(t-1)*5]*log.(Z_N[:, t-1]))
+        Z_N[:, t] .= exp.(params1n[(t-1)*5-4] .+ params1n[(t-1)*5-3]*log.(Z_N[:, t-1]) .+
+                        params1n[(t-1)*5-2]*log.(τ_opt[:, t-1]) .+ 
+                        params1n[(t-1)*5-1]*log.(M_opt[:, t-1]) .+
+                        params1n[(t-1)*5]*log.(Z_C[:, t-1]))
+    end
+    #println("Z_C: ", Z_C, "Z_N: ", Z_N)
+
+    # --- Compute Z_C/Z_N means per age ---
+    Z_C_means = [mean(Z_C[:, age]) for age in 1:n_age]
+    Z_C_stds  = [std(Z_C[:, age])  for age in 1:n_age]
+    Z_N_means = [mean(Z_N[:, age]) for age in 1:n_age]
+    Z_N_stds  = [std(Z_N[:, age])  for age in 1:n_age]
+
+    # --- Compute CPM/τ/R moments ---
+    CPM_mean_age = [mean(CPM_vec[time_vec .== age]) for age in 1:n_age]*100
+
+    # --- Vectorized τ moments ---
+    τ_means = [mean(τ_vec[(time_vec .== age)]) for age in 1:n_age]
+    τ_stds = [std(τ_vec[(time_vec .== age)]) for age in 1:n_age]
+
+    # --- Vectorized R moments ---
+    R_vals_mat = 100 .* R_vec ./ income_vec
+    R_share_by_age     = [mean(R_vals_mat[(time_vec .== a) .& (R_vec .> 0)]) for a in 1:n_age]
+    R_share_sd_by_age  = [std(R_vals_mat[(time_vec .== a) .& (R_vec .> 0)]) for a in 1:n_age]
+
+    # --- Correlations ---
+    #valid1 = (medu_vec .!= -999)
+    #corr1 = cor(CPM_vec[valid1], medu_vec[valid1])
+    #corr2 = cor(CPM_vec, time_vec)
+
+    # --- Combine moments ---
+    moments = vcat(
+        τ_means..., τ_stds...,
+        R_share_by_age..., R_share_sd_by_age...,
+        Z_C_means..., Z_C_stds...,
+        Z_N_means..., Z_N_stds...,
+        CPM_mean_age...
+    )
+
+    return moments
 end
