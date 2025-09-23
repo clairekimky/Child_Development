@@ -42,18 +42,27 @@ df_matrix1 = Matrix(df1)
 
 # Set initial parameters
 # Age-specific TFP + production parameters
-A_c_1 = -0.08
-A_c_2 = -0.081250732812860653
-A_c_3 = -0.106250732812860653
-δ_c_1 = 0.7446
-δ_c_2 = 0.26161
-δ_c_3 = 0.141257023
-δ_c_4 = 0.17857259
+A_c_1 = -0.047
+A_c_2 = -0.044250732812860653
+A_c_3 = -0.04006250732812860653
+δ_c_11 = 0.708
+δ_c_21 = 0.1076
+δ_c_31 = 0.161257023
+δ_c_41 = 0.177957259
+δ_c_12 = 0.7309
+δ_c_22 = 0.125161
+δ_c_32 = 0.13257023
+δ_c_42 = 0.2057259
+δ_c_13 = 0.7740
+δ_c_23 = 0.15161
+δ_c_33 = 0.1051257023
+δ_c_43 = 0.23517259
 
-params1 = [A_c_1, A_c_2, A_c_3, δ_c_1, δ_c_2, δ_c_3, δ_c_4]
+params1 = [A_c_1, δ_c_11, δ_c_21, δ_c_31, δ_c_41, A_c_2, δ_c_12, δ_c_22, δ_c_32, δ_c_42,
+A_c_3, δ_c_13, δ_c_23, δ_c_33, δ_c_43]
 
 # Add 4 CRE parameters (initially zero)
-params1_CRE = vcat(params1, [-0.188530278, .10295844, 0.10231213, 0.144576])  # γ_1..γ_4
+params1_CRE = vcat(params1, [0.516, -.5295844, -0.60231213, 0.3044576])  # γ_1..γ_4
 
 function moment_conditions_cog_CRE(params, df)
     groups = [1, 2, 3]
@@ -100,16 +109,15 @@ function moment_conditions_cog_CRE(params, df)
         avg_matrix = hcat(child_avg...)'  # Nx4
 
         # Fitted values: ln_A + δ*current + γ*child_avg
-        ln_A = params[i]
-        fitted = ln_A .+
-         params[4] .* log.(z) .+
-         params[5] .* log.(tau) .+   # only if log_tau is strictly positive
-         params[6] .* log.(M) .+     # M column
-         params[7] .* log.(hyp) .+       # hyp column
-         params[8] .* (avg_matrix[:,1]) .+
-         params[9] .* (avg_matrix[:,2]) .+
-         params[10] .* (avg_matrix[:,3]) .+
-         params[11] .* (avg_matrix[:,4])
+        fitted = params[1+5*(i-1)] .+
+         params[2+5*(i-1)] .* log.(z) .+
+         params[3+5*(i-1)] .* log.(tau) .+   # only if log_tau is strictly positive
+         params[4+5*(i-1)] .* log.(M) .+     # M column
+         params[5+5*(i-1)] .* log.(hyp) .+       # hyp column
+         params[16] .* (avg_matrix[:,1]) .+
+         params[17] .* (avg_matrix[:,2]) .+
+         params[18] .* (avg_matrix[:,3]) .+
+         params[19] .* (avg_matrix[:,4])
 
         residuals = log.(z_f) .- fitted
 
@@ -182,13 +190,23 @@ end
 valid_rows = findall(row -> all(.!isnan.(row)), eachrow(param_boot))
 param_boot_clean = param_boot[valid_rows,:]
 
+# Bootstrapped SEs
+boot_se = mapslices(std, param_boot_clean; dims=1)
+param_names = ["lnA₁", "δ₁₁", "δ₂₁", "δ₃₁", "δ₄₁", 
+               "lnA₂", "δ₁₂", "δ₂₂", "δ₃₂", "δ₄₂",
+               "lnA₃", "δ₁₃", "δ₂₃", "δ₃₃", "δ₄₃", 
+               "γ₁", "γ₂", "γ₃", "γ₄"]
+for i in 1:19
+    println("$(param_names[i]): $(round(params_step2[i]; digits=4)) (SE = $(round(boot_se[i]; digits=4)))")
+end
+
 # 95% CI
 ci_lower = mapslices(p -> quantile(p,0.025), param_boot_clean; dims=1)
 ci_upper = mapslices(p -> quantile(p,0.975), param_boot_clean; dims=1)
 
 # Display main production parameters (first 7)
 param_names = ["ln_A₁","ln_A₂","ln_A₃","δ₁","δ₂","δ₃","δ₄", "γ₁","γ₂","γ₃","γ₄"]
-for i in 1:11
+for i in 1:19
     println("$(param_names[i]): $(round(params_step2[i]; digits=4)) [$(round(ci_lower[i]; digits=4)), $(round(ci_upper[i]; digits=4))]")
 end
 
@@ -198,7 +216,17 @@ flatten_params1 = vec(params_step2)  # ensures it's a 1D vector
 
 # Save estimated parameters
 df_params1 = DataFrame(estimated_params1 = flatten_params1)
-CSV.write("params1_const.csv", df_params1)
+CSV.write("params1.csv", df_params1)
+
+# Save bootstrapped SEs for the non-cognitive skill parameters
+boot_se_vec = vec(boot_se)
+
+df_se_cog = DataFrame(
+    param_id = 1:length(boot_se_vec),
+    se = boot_se_vec
+)
+
+CSV.write("params1_se.csv", df_se_cog)
 
 # Save bootstrapped confidence intervals for the cognitive skill parameters
 # Make sure ci_lower and ci_upper are vectors (1D)
@@ -221,20 +249,29 @@ df_matrix2 = Matrix(df2)
 
 # Set initial parameters
 # Age 10-11
-A_n_1 = -0.9136
-A_n_2 = -0.9353
-A_n_3 = -1.1940
-δ_n_1 = 0.4658 # Non-cognitive Skills
-δ_n_2 = 0.4438 # Study Time
-δ_n_3 = 0.3368 # Child-goods Investments
-δ_n_4 = 0.2722 # Cognitive Skills
+A_n_1 = -2.87136
+A_n_2 = -3.053
+A_n_3 = -3.19940
+δ_n_11 = 0.49258 # Non-cognitive Skills
+δ_n_21 = 0.13838 # Study Time
+δ_n_31 = 0.1668 # Child-goods Investments
+δ_n_41 = 0.1822 # Cognitive Skills
+δ_n_12 = 0.5058 # Non-cognitive Skills
+δ_n_22 = 0.1538 # Study Time
+δ_n_32 = 0.1468 # Child-goods Investments
+δ_n_42 = 0.21122 # Cognitive Skills
+δ_n_13 = 0.5158 # Non-cognitive Skills
+δ_n_23 = 0.1738 # Study Time
+δ_n_33 = 0.1268 # Child-goods Investments
+δ_n_43 = 0.2222 # Cognitive Skills
 
-params2 = [A_n_1, A_n_2, A_n_3, δ_n_1, δ_n_2, δ_n_3, δ_n_4]
+params2 = [A_n_1, δ_n_11, δ_n_21, δ_n_31, δ_n_41, A_n_2, δ_n_12, δ_n_22, δ_n_32, δ_n_42,
+A_n_3, δ_n_13, δ_n_23, δ_n_33, δ_n_43]
 
 # Add 4 CRE parameters (initially zero)
-params2_CRE = vcat(params2, [0.284525978460708, -0.36052581507, -0.17193, .19885709])  # γ_1..γ_4
+params2_CRE = vcat(params2, [0.284525978460708, -1.52581507, 0.2317193, .39885709])  # γ_1..γ_4
 
-function moment_conditions_cog_CRE(params, df)
+function moment_conditions_ncog_CRE(params, df)
     groups = [1, 2, 3]
     all_moments = []
 
@@ -244,7 +281,7 @@ function moment_conditions_cog_CRE(params, df)
     for id in child_ids
         rows = findall(df[:,1] .== id)
         avg_vals = Float64[]
-        for col in [3, 4, 7, 11]  # cog, tau, z, M
+        for col in [7, 4, 11, 3]  # z, tau, M, cog
             valid_rows = [r for r in rows if df[r,col] > 0]
             push!(avg_vals, isempty(valid_rows) ? 0.0 : mean(log.(df[valid_rows, col])))
         end
@@ -267,7 +304,7 @@ function moment_conditions_cog_CRE(params, df)
         z       = [row[7] for row in valid_rows]
         tau = [row[4] for row in valid_rows]
         M   = [row[11] for row in valid_rows]
-        hyp     = [row[3] for row in valid_rows]
+        cog     = [row[3] for row in valid_rows]
 
         # Instruments
         inst1 = [row[5] for row in valid_rows]
@@ -279,17 +316,15 @@ function moment_conditions_cog_CRE(params, df)
         avg_matrix = hcat(child_avg...)'  # Nx4
 
         # Fitted values: ln_A + δ*current + γ*child_avg
-        ln_A = params[i]
-        fitted = ln_A .+
-         params[4] .* log.(z) .+
-         params[5] .* log.(tau) .+   # only if log_tau is strictly positive
-         params[6] .* log.(M) .+     # M column
-         #params[7] .* log.(hyp)       # hyp column
-         params[7] .* log.(hyp) .+       # hyp column
-         params[8] .* avg_matrix[:,1] .+ # cog
-        params[9] .* avg_matrix[:,2] .+ # τ
-        params[10] .* avg_matrix[:,3] .+ # z
-        params[11] .* avg_matrix[:,4] # M
+        fitted = params[1+5*(i-1)] .+
+         params[2+5*(i-1)] .* log.(z) .+
+         params[3+5*(i-1)] .* log.(tau) .+   # only if log_tau is strictly positive
+         params[4+5*(i-1)] .* log.(M) .+     # M column
+         params[5+5*(i-1)] .* log.(cog) .+       # hyp column
+         params[16] .* avg_matrix[:,1] .+ # cog
+        params[17] .* avg_matrix[:,2] .+ # τ
+        params[18] .* avg_matrix[:,3] .+ # z
+        params[19] .* avg_matrix[:,4] # M
 
         residuals = log.(z_f) .- fitted
 
@@ -301,35 +336,35 @@ function moment_conditions_cog_CRE(params, df)
     return vcat(all_moments...)
 end
 
-function gmm_objective(params, data)
-    m = moment_conditions_cog_CRE(params, data)
+function gmm_objective_ncog(params, data)
+    m = moment_conditions_ncog_CRE(params, data)
     g = vec(mean(m, dims=1))
     return dot(g,g)  # Identity weighting
 end
 
-function compute_optimal_weight_matrix(params, data)
-    m = moment_conditions_cog_CRE(params, data)
+function compute_optimal_weight_matrix_ncog(params, data)
+    m = moment_conditions_ncog_CRE(params, data)
     g = m .- mean(m, dims=1)
     W = (g' * g) / size(g,1)
     return inv(W)
 end
 
-function gmm_objective_weighted(params, data, W)
-    m = moment_conditions_cog_CRE(params, data)
+function gmm_objective_weighted_ncog(params, data, W)
+    m = moment_conditions_ncog_CRE(params, data)
     g = vec(mean(m, dims=1))
     return g' * W * g
 end
 
 # Step 1: First-step GMM
-res_step1 = Optim.optimize(p -> gmm_objective(p, df_matrix2), params2_CRE, BFGS())
+res_step1 = Optim.optimize(p -> gmm_objective_ncog(p, df_matrix2), params2_CRE, BFGS())
 #res_step1 = Optim.optimize(p -> gmm_objective(p, df_matrix2), params2, BFGS())
 params_step1 = Optim.minimizer(res_step1)
 
 # Step 2: Optimal weighting matrix
-W_opt = compute_optimal_weight_matrix(params_step1, df_matrix2)
+W_opt = compute_optimal_weight_matrix_ncog(params_step1, df_matrix2)
 
 # Step 3: Efficient GMM
-res_step2 = Optim.optimize(p -> gmm_objective_weighted(p, df_matrix2, W_opt), params_step1, BFGS())
+res_step2 = Optim.optimize(p -> gmm_objective_weighted_ncog(p, df_matrix2, W_opt), params_step1, BFGS())
 params_step2 = Optim.minimizer(res_step2)
 
 num_bootstrap = 100
@@ -347,12 +382,12 @@ for b in 1:num_bootstrap
     df_b = vcat([df_matrix2[df_matrix2[:,1] .== id, :] for id in sampled_ids]...)
 
     try
-        res1 = Optim.optimize(p -> gmm_objective(p, df_b), params2_CRE, BFGS())
+        res1 = Optim.optimize(p -> gmm_objective_ncog(p, df_b), params2_CRE, BFGS())
         params_step1_b = Optim.minimizer(res1)
         #param_boot[b,:] = Optim.minimizer(res1)
 
-        W_b = compute_optimal_weight_matrix(params_step1_b, df_b)
-        res2 = Optim.optimize(p -> gmm_objective_weighted(p, df_b, W_b), params_step1_b, BFGS())
+        W_b = compute_optimal_weight_matrix_ncog(params_step1_b, df_b)
+        res2 = Optim.optimize(p -> gmm_objective_weighted_ncog(p, df_b, W_b), params_step1_b, BFGS())
         param_boot[b,:] .= Optim.minimizer(res2)
 
     catch e
@@ -365,13 +400,23 @@ end
 valid_rows = findall(row -> all(.!isnan.(row)), eachrow(param_boot))
 param_boot_clean = param_boot[valid_rows,:]
 
+# Bootstrapped SEs
+boot_se = mapslices(std, param_boot_clean; dims=1)
+param_names = ["lnA₁", "δ₁₁", "δ₂₁", "δ₃₁", "δ₄₁", 
+               "lnA₂", "δ₁₂", "δ₂₂", "δ₃₂", "δ₄₂",
+               "lnA₃", "δ₁₃", "δ₂₃", "δ₃₃", "δ₄₃", 
+               "γ₁", "γ₂", "γ₃", "γ₄"]
+for i in 1:19
+    println("$(param_names[i]): $(round(params_step2[i]; digits=4)) (SE = $(round(boot_se[i]; digits=4)))")
+end
+
 # 95% CI
 ci_lower = mapslices(p -> quantile(p,0.025), param_boot_clean; dims=1)
 ci_upper = mapslices(p -> quantile(p,0.975), param_boot_clean; dims=1)
 
 # Display main production parameters (first 7)
 param_names = ["ln_A₁","ln_A₂","ln_A₃","δ₁","δ₂","δ₃","δ₄", "γ₁","γ₂","γ₃","γ₄"]
-for i in 1:11
+for i in 1:19
     println("$(param_names[i]): $(round(params_step2[i]; digits=4)) [$(round(ci_lower[i]; digits=4)), $(round(ci_upper[i]; digits=4))]")
 end
 
@@ -381,7 +426,17 @@ flatten_params1 = vec(params_step2)  # ensures it's a 1D vector
 
 # Save estimated parameters
 df_params1 = DataFrame(estimated_params1 = flatten_params1)
-CSV.write("params2_const.csv", df_params1)
+CSV.write("params2.csv", df_params1)
+
+# Save bootstrapped SEs for the non-cognitive skill parameters
+boot_se_vec = vec(boot_se)
+
+df_se_cog = DataFrame(
+    param_id = 1:length(boot_se_vec),
+    se = boot_se_vec
+)
+
+CSV.write("params2_se.csv", df_se_cog)
 
 # Save bootstrapped confidence intervals for the cognitive skill parameters
 # Make sure ci_lower and ci_upper are vectors (1D)
