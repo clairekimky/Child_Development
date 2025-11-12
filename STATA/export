@@ -1,98 +1,301 @@
 
+
 clear all
 
-cd "/Users/clairekim/Desktop/Project/Child Development/STATA"
+cd "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis"
 
-use empirics, clear
+********** Export the data for model estimation
 
-***** Reshape the data *****
+* Export Cohort K NAPLAN scores
 
-sort id_child agey
+use "/Users/clairekim/Desktop/Project/Child Development/LSAC/clean/naplanK.dta", clear
 
-/* keep id_child agey mathraw mathpercent mathstandard readraw readpercent readstandard ppvtraw ppvtpercent ppvtstandard girlroleb girlrolec girlrolee girlrolef
+keep cid num read write wave
 
-reshape wide mathraw mathpercent mathstandard readraw readpercent readstandard ppvtraw ppvtpercent ppvtstandard girlroleb girlrolec girlrolee girlrolef, i(id_child) j(agey) */
+keep if wave == 7
 
-keep id_child agey mathstandard readstandard compstandard girlroleb girlrolec girlrolee girlrolef
+keep cid num read write wave
 
-reshape wide mathstandard readstandard compstandard girlroleb girlrolec girlrolee girlrolef, i(id_child) j(agey)
+gen cohort = 2
+gen age = 4
 
-* Create 3-period variables
+* Replace missing values with -999 for all variables
+foreach var of varlist * {
+    replace `var' = . if `var' < 0
+}
 
-gen math1 = mathstandard10
-gen read1 = readstandard10
-gen comp1 = compstandard10
-gen girlb1 = girlroleb10
-gen girlc1 = girlrolec10
-gen girle1 = girlrolee10
-gen girlf1 = girlrolef10 // period 1
+sort cid age
 
-gen math2 = mathstandard12
-replace math2 = mathstandard11 if math2 == . & mathstandard11 ~= .
-gen read2 = readstandard12
-replace read2 = readstandard11 if read2 == . & readstandard11 ~= .
-gen comp2 = compstandard12
-replace comp2 = compstandard11 if comp2 == . & compstandard11 ~= .
-gen girlb2 = girlroleb12
-replace girlb2 = girlroleb11 if girlb2 == . & girlroleb11 ~= .
-gen girlc2 = girlrolec12
-replace girlc2 = girlrolec11 if girlc2 == . & girlrolec11 ~= .
-gen girle2 = girlrolee12
-replace girle2 = girlrolee11 if girle2 == . & girlrolee11 ~= .
-gen girlf2 = girlrolef12 
-replace girlf2 = girlrolef11 if girlf2 == . & girlrolef11 ~= . // period 2
+save naplanK7, replace
 
-gen math3 = mathstandard14
-replace math3 = mathstandard13 if math3 == . & mathstandard13 ~= .
-gen read3 = readstandard14
-replace read3 = readstandard13 if read3 == . & readstandard13 ~= .
-gen comp3 = compstandard14
-replace comp3 = compstandard13 if comp3 == . & compstandard13 ~= .
-gen girlb3 = girlroleb14
-replace girlb3 = girlroleb13 if girlb3 == . & girlroleb13 ~= .
-gen girlc3 = girlrolec14
-replace girlc3 = girlrolec13 if girlc3 == . & girlrolec13 ~= .
-gen girle3 = girlrolee14
-replace girle3 = girlrolee13 if girle3 == . & girlrolee13 ~= .
-gen girlf3 = girlrolef14 
-replace girlf3 = girlrolef13 if girlf3 == . & girlrolef13 ~= . // period 3
+* Export Cohort B NAPLAN scores
 
-keep id_child math1 math2 math3 read1 read2 read3 comp1 comp2 comp3 girlb1 girlb2 girlb3 girlc1 girlc2 girlc3 girle1 girle2 girle3 girlf1 girlf2 girlf3
+use "/Users/clairekim/Desktop/Project/Child Development/LSAC/clean/naplanB.dta", clear
 
-sort id_child
+keep cid num read write wave
 
-save "/Users/clairekim/Desktop/Project/Child Development/STATA/factor_n_temp.dta", replace
+keep if wave == 9
 
-***** Merge Data ******
+keep cid num read write wave
 
-use empirics, clear
+sort cid wave
 
-keep id_child female
+gen cohort = 1
+gen age = 4
 
-duplicates report id_child female
+* Replace missing values with -999 for all variables
+foreach var of varlist * {
+    replace `var' = . if `var' < 0
+}
 
-duplicates list id_child female
+sort cid age
 
-duplicates drop id_child female, force
+save naplanB9, replace
 
-sort id_child
+* Export Cohort K hyperactivity scores
 
-merge id_child using factor_n_temp
+use "/Users/clairekim/Desktop/Project/Child Development/LSAC/clean/survey16.dta", clear
+
+rename hicid cid
+
+keep cid wave concent1 concent2 concent3 hypscore p1sex p2sex cob p1bio p2bio momi dadid
+
+gen mbio = p2bio if p1sex == 1 // p1sex = 1 if Male and = 2 if Female
+replace mbio = p1bio if p1sex == 2
+replace mbio = -9 if p1sex==-9
+replace mbio = p1bio if p1sex== p2sex
+
+gen fbio = p1bio if p1sex==1
+replace fbio = p2bio if p1sex==2
+replace fbio = -9 if p1sex==-9
+replace fbio = p2bio if p1sex== p2sex
+
+gen cohort = 2
+gen age = 4
+
+* Replace missing values with -999 for all variables
+foreach var of varlist * {
+    replace `var' = . if `var' < 0
+}
+
+sort cid wave
+
+save hypK7, replace
+
+****** Merge Cohort K datasets
+
+use hypk7, clear
+sort cid age
+merge cid age using naplanK7
 
 drop _merge
 
-egen any_missing = rowmiss(_all)
+save cohortk16, replace
 
-drop if any_missing > 0 // Drop individuals if all measures are missing
+****** Append datasets
 
-foreach var of varlist _all {
-		replace `var' = -999 if `var' == .
-	}
+use data_bp, clear
 
-* Export specified variables without labels to CSV file
-export delimited id_child math1 read1 comp1 girlb1 girlc1 girle1 girlf1 math2 read2 comp2 girlb2 girlc2 girle2 girlf2 math3 read3 comp3 girlb3 girlc3 girle3 girlf3 if female == 1 using "/Users/clairekim/Desktop/Project/Child Development/julia/data_meas_f.csv", replace nolabel
+sort cid wave
 
-export delimited id_child math1 read1 comp1 girlb1 girlc1 girle1 girlf1 math2 read2 comp2 girlb2 girlc2 girle2 girlf2 math3 read3 comp3 girlb3 girlc3 girle3 girlf3 if female == 0 using "/Users/clairekim/Desktop/Project/Child Development/julia/data_meas_m.csv", replace nolabel
+append using naplanB9
+append using cohortk16
 
-histogram girlb2 if girlb2 ~= -999, percent xtitle("A girl could let a boy know she is smarter than he is")
-graph export "/Users/clairekim/Desktop/Project/Child Development/STATA/Figures/cens.png", replace as(png) name("Graph")
+replace fage = . if fage == 1 // Weird number
+
+xtset cid wave
+xtdescribe
+
+bysort cid: gen n_obs = _N
+summ wave
+
+drop if n_obs < 4
+
+drop n_obs
+
+tab cohort
+
+save export_bp, replace
+
+****** Sample Restriction ******
+
+/*
+All of my results are based on a selected sample of LSAC households that satisfy several criteria.
+
+(1) Included households are intact over the observed period (i.e. only stable two-parent households). 
+(2) All children are biological; there are no adopted children and no step-parents.
+(3) All selected children are at least 10 years old during the fourth wave of the LSAC, because I need access to an initial NAPLAN score observation. 
+(4) All selected children have an observed NAPLAN score in 2010 and following waves.
+(5) I keep only data observations for selected children whose age is between 10 and 15 at the interview date for waves 4 through
+6.
+*/
+
+* Count sample size
+
+********** Cognitive Skill Production
+
+use export_bp, clear
+
+xtset cid age
+
+sort cid age
+
+bysort cid (age): gen read_f = read[_n+1] if inrange(_n, 1, 3)
+bysort cid (age): gen num_f = num[_n+1] if inrange(_n, 1, 3)
+bysort cid (age): gen write_f = write[_n+1] if inrange(_n, 1, 3)
+
+* Step 1: Count the number of distinct age values per cid
+bysort cid: egen num_periods = total(inlist(age, 1, 2, 3))
+
+* Step 2: Keep only those cids that have observations for all 3 periods (t = 1, 2, and 3)
+keep if num_periods == 3
+
+* Step 3: Drop the helper variable
+drop num_periods
+
+keep if age ~= .
+
+sort cid age 
+
+********** Make it to weekly measures
+
+***** ROUGHLY
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 1, detail
+gen schhr = 6.666667 if age == 1 & inrange(day, 1, 5) & schoolmean ~= .
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 2, detail
+replace schhr = 6.783333 if age == 2 & inrange(day, 1, 5) & schoolmean ~= .
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 3, detail
+replace schhr = 6.75 if age == 3 & inrange(day, 1, 5) & schoolmean ~= .
+
+replace schhr = 0 if inrange(day, 6, 7) & inrange(age, 1, 3)
+
+xtset cid age
+sort cid age
+
+keep if schhr ~= . & hhinc ~= 0
+
+replace schhr = 60*schhr
+
+xtset cid age
+xtdescribe
+
+keep cid cohort wave age simean day read num write hhinc hypscore read_f num_f write_f
+
+sort cid age
+
+******** For the first-stage parameter estimation
+
+******* Reverse-code the hyperactivity scores
+
+gen hyp_n = 11 - hypscore // attention capacities
+
+* Generate Educational Investment variable using a fixed share of income (proxy)
+
+gen M = hhinc*0.028
+
+drop if age == .
+
+* Step 1: Count the number of distinct age values per cid
+bysort cid: egen num_periods = total(inlist(age, 1, 2, 3, 4))
+
+* Step 2: Keep only those cids that have observations for all 3 periods (t = 1, 2, and 3)
+
+keep if num_periods == 3
+drop num_periods
+
+* Replace missing values with -999 for all variables
+foreach var of varlist * {
+    replace `var' = -999 if missing(`var')
+}
+
+sort cid
+egen cid_n = group(cid)
+drop cid
+rename cid_n cid
+
+drop if age == 4
+
+keep cid age read_f num_f write_f read num write simean M hyp_n
+
+order cid age M read_f num_f write_f read num write simean hyp_n
+
+export delimited using "/Users/clairekim/Desktop/Project/Child Development/LSAC/code/cogparams.csv", replace
+
+
+
+******** For the second-stage parameter estimation (SMM)
+
+use data_bp, clear
+
+gen hyp_n = 11 - hypscore // Range from 1 to 11, higher number repreesents more attention
+
+gen hyp_init = hyp_n if age == 1
+bysort cid (age): replace hyp_init = hyp_init[_n-1] if hyp_init[_n] == . & hyp_init[_n-1] ~= . & age > 1
+
+sort cid age
+
+* Generate Educational Investment variable
+gen M = hhinc*0.028 // Educational Investment
+gen R = hhinc*0.132 // Baseline Child goods
+
+xtset cid age
+
+********** Make it to weekly measures
+
+***** ROUGHLY
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 1, detail
+gen schhr = 6.666667 if age == 1 & inrange(day, 1, 5) & schoolmean ~= .
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 2, detail
+replace schhr = 6.783333 if age == 2 & inrange(day, 1, 5) & schoolmean ~= .
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 3, detail
+replace schhr = 6.75 if age == 3 & inrange(day, 1, 5) & schoolmean ~= .
+
+replace schhr = 0 if inrange(day, 6, 7) & inrange(age, 1, 3)
+
+xtset cid age
+sort cid age
+
+keep if schhr ~= . & hhinc ~= 0
+
+replace schhr = 60*schhr
+
+xtset cid age
+xtdescribe
+
+* Step 1: Count the number of distinct age values per cid
+bysort cid: egen num_periods = total(inlist(age, 1, 2, 3))
+
+* Step 2: Keep only those cids that have observations for all 3 periods (t = 1, 2, and 3)
+keep if num_periods == 3
+
+* Step 3: Drop the helper variable
+drop num_periods
+
+keep if age ~= .
+
+sort cid age 
+
+save data_2nd, replace
+
+* Replace missing values with -999 for all variables
+foreach var of varlist * {
+    replace `var' = -999 if missing(`var')
+}
+
+sort cid
+egen cid_n = group(cid)
+drop cid
+rename cid_n cid
+
+keep cid age cpm_all hhinc schhr simean pmamount M read hyp_n mcol R hyp_init
+
+order cid age mcol cpm_all hhinc schhr simean pmamount M read hyp_n R hyp_init
+
+export delimited using "/Users/clairekim/Desktop/Project/Child Development/LSAC/code/prefparams.csv", replace
+
