@@ -1,12 +1,11 @@
 # Child_Development
 
-The paper uses two databases: NLSY79 and NLSY79-C/YA. Both databases are publicly available, therefore I provide the codes and the data to reproduce the results in the paper.
+The paper uses "Longitudinal Study of Australian Children". The data is available for free through the Australian Data Archive Dataverse platform. However, the data is for approved researchers from government, academic institutions and non-profit organisations, therefore I provide the codes only.
 
 # Codes, Estimates, and Tables
 
 1) Folder: "STATA"
-   The file "empirics.dta" contains the data to replicate all Tables () in the paper. The file "panel.do" contains the program that replicates the resultsin these tables.
+   The file "clean.do" cleans the data. The file "panel.do" contains the program that replicates the resultsin these tables.
    
-3) Folder: "data"
-4) Folder: "FirstStage"
-5) Folder: "SecondStage"
+2) Folder: "LSAC/Julia/Code" contains all codes used for estimating a structural model.
+   The file "compute_1st.jl" contains production parameter estimation using GMM.
