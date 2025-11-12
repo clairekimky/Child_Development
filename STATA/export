@@ -240,6 +240,7 @@ sort cid age
 * Generate Educational Investment variable
 gen M = hhinc*0.028 // Educational Investment
 gen R = hhinc*0.132 // Baseline Child goods
+replace simean = 60*simean
 
 xtset cid age
 
