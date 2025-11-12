@@ -1,0 +1,330 @@
+
+clear all
+
+cd "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis"
+
+********** Third Stage: Analysis
+
+use analysis, clear
+
+sort cid age
+
+rename cohort_n cohort
+
+****** Sample Restriction ******
+
+/*
+All of my results are based on a selected sample of LSAC households that meet several criteria. First, only stable, two-parent households are included. Second, all children are biological (i.e., no adopted children or step-parents). Third, all selected children are at least 10 years old. Fourth, each selected child has an observed NAPLAN score. Finally, I retain only observations for children aged 10 to 15.
+*/
+
+* Count sample size
+bysort cid: gen noid = [_n]
+
+*drop if cid == 11104216 & noid == 2 // Double count
+*drop if cid == 11104216 & noid == 4 // Double count
+
+*drop if cid == 71111031 & nonact == 12.5 // Weird measure
+replace fage = . if fage == 1 // Weird number
+
+xtset cid age
+
+****** Data Evidence *******
+
+*(0) Basic Summary Statistics (Table 1)
+
+** Parents
+
+gen mcol = 1 if inrange(medu1, 1, 3)
+replace mcol = 0 if inrange(medu1, 4, 6)
+gen fcol = 1 if inrange(fedu1, 1, 3)
+replace fcol = 0 if inrange(fedu1, 4, 6)
+
+****** Use uniform sample (comparable)
+
+replace simean = . if simean > 10 & schoolmean ~= . & simean ~= .
+replace simean = . if simean > 16 & simean ~= . & schoolmean == . // Exclude outliers from the sample analysis
+
+***** Complete CPM
+gen cpm_n = .
+replace cpm_n = cpm
+replace cpm_n = 1 if ecpm == 1 // CPM + ECPM
+
+gen weekday = 1 if inrange(day, 1, 5)
+replace weekday = 0 if inrange(day, 6, 7)
+
+gen cpm_all = cpm_n if cpm_n ~=.
+replace cpm_all = 0 if pmind == 0
+
+replace pmamount = 0 if pmind == 0 & pmamount == .
+
+****** Summary Statistics 
+
+gen sampleok = !missing(hypscore, read, hhinc) & inrange(age, 1, 3) & mbio == 3 & cob == 1101 & momid ~=. & dadid ~= .
+
+tab noid if sampleok
+tab cohort if sampleok & noid == 1
+
+keep if sampleok
+keep cid age cage grade mage fage mcol fcol simean pmind weekday concent3 read num write pmamount hhinc cpm_n cpm_all numsib female border schoolmean day pmcpi hhinccpi siweekday siweekend hypscore concent1 concent2 concent4 concent5 cohort wave
+
+xtset cid age
+xtdescribe
+
+bysort cid: gen n_obs = _N
+sum age
+local total_periods = r(max) - r(min) + 1
+
+drop if n_obs < `total_periods'
+
+drop n_obs
+
+tab cohort
+
+save "data_bp.dta", replace // Balanced panel
+
+**** Consistent School hour
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 1, detail
+gen schhr = 6.666667 if age == 1 & inrange(day, 1, 5) & schoolmean ~= .
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 2, detail
+replace schhr = 6.783333 if age == 2 & inrange(day, 1, 5) & schoolmean ~= .
+
+sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 3, detail
+replace schhr = 6.75 if age == 3 & inrange(day, 1, 5) & schoolmean ~= .
+
+replace schhr = 0 if inrange(day, 6, 7) & inrange(age, 1, 3)
+
+xtset cid age
+sort cid age
+
+keep if schhr ~= . & hhinc ~= 0
+
+replace schhr = 60*schhr
+
+xtset cid age
+xtdescribe
+
+* Step 1: Count the number of distinct age values per cid
+bysort cid: egen num_periods = total(inlist(age, 1, 2, 3))
+
+* Step 2: Keep only those cids that have observations for all 3 periods (t = 1, 2, and 3)
+keep if num_periods == 3
+
+* Step 3: Drop the helper variable
+drop num_periods
+
+keep if age ~= .
+
+sort cid age 
+
+***** Demographics (Aggregate)
+
+replace pmcpi = 0 if pmamount == 0
+
+sum pmind pmcpi cpm_all hhinccpi simean siweekday siweekend schoolmean read hypscore // Make simple tables of descriptive statistics. Put `i' in front of factor variables
+
+sum pmcpi if pmind == 1
+
+***** Main Variables disaggregated by child's age
+
+dtable pmind pmcpi cpm_all hhinccpi simean siweekday siweekend schoolmean, by(age) // Make simple tables of descriptive statistics. Put `i' in front of factor variables
+
+dtable pmcpi if pmind == 1, by(age)
+
+replace simean = 60*simean
+
+***** Heterogeneity in Child's SR
+
+* Generate Initial SR variables
+gen hyp_init = hypscore if age == 1
+bysort cid (age): replace hyp_init = hyp_init[_n-1] if hyp_init[_n] == . & hyp_init[_n-1] ~= . & age > 1 
+
+sum hypscore, detail
+sum hyp_init, detail
+
+* Define low and high SR children
+gen lowreg = 1 if inrange(hyp_init, 6, 10) // Low Self-Regulation (Bottom 25% of attention capacitiy)
+replace lowreg = 0 if inrange(hyp_init, 0, 1) // High Self-Regulation (Top 25% of attention capacitiy)
+
+***** Income distribution and CPM Adoption
+
+* Create income quintiles
+xtile income_quartile = hhinc, nq(4)
+
+dtable cpm_all if income_quartile == 1, by(age)
+dtable cpm_all if income_quartile == 2, by(age)
+dtable cpm_all if income_quartile == 3, by(age)
+dtable cpm_all if income_quartile == 4, by(age)
+dtable cpm_all, by(age)
+
+*** Model and Counterfactuals Motivation 
+
+* (1) Heterogeneity
+foreach var of varlist hhinccpi read simean pmcpi {
+    ttest `var', by(lowreg)
+}
+
+* (2) Are low-SR kids disproportionately in low-SES families?
+ttest hhinccpi, by(cpm_all)
+
+* (3) CPM receivers no difference in study time but it matters for no CPM
+foreach var of varlist simean {
+    ttest `var' if cpm_all == 0, by(lowreg)
+}
+foreach var of varlist simean {
+    ttest `var' if cpm_all == 1, by(lowreg)
+}
+
+* (4) Need higher money to induce low SR children to comply with CPM contract
+foreach var of varlist pmcpi {
+    ttest `var' if lowreg == 1, by(cpm_all)
+}
+foreach var of varlist pmcpi {
+    ttest `var' if lowreg == 0, by(cpm_all)
+}
+
+********* Trend in test scores (All Sample)
+
+egen avgread = mean(read), by(age)
+
+line avgread age, sort ///
+    ytitle("Test Scores", size(large)) ///
+    xtitle("Child's Age", size(large)) ///
+    graphregion(color(white)) ///
+    plotregion(color(white)) ///
+    lcolor(magenta) ///
+    legend(pos(5) ring(0) col(1) size(large)) ///
+    xlabel(1 "10–11" 2 "12–13" 3 "14–15", nogrid labsize(med)) ///
+    ylabel(, nogrid labsize(large))
+	
+graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/read_bp.png", replace as(png) name("Graph")
+
+********* Trend in hyperactivity (All Sample)
+
+egen avghyp = mean(hypscore), by(age)
+
+line avghyp age, sort ///
+    ytitle("SDQ Hyperactivity Scale", size(large)) ///
+	xtitle("Child's Age", size(large)) ///
+    graphregion(color(white)) ///
+	plotregion(color(white)) ///
+	legend(pos(5) ring(0) col(1) ///
+        size(medsmall)) ///
+    xlabel(1 "10–11" 2 "12–13" 3 "14–15", nogrid labsize(med)) ///
+	ylabel(, nogrid labsize(large))
+
+graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/hyp_bp.png", replace as(png) name("Graph")
+
+********* Trend in test scores (by Hyperactivity)
+
+egen avgreadh = mean(read) if lowreg == 0, by(age)
+egen avgreadl = mean(read) if lowreg == 1, by(age)
+
+egen avgreadh_cpm = mean(read) if lowreg == 0 & cpm_all == 1, by(age)
+egen avgreadl_cpm = mean(read) if lowreg == 1 & cpm_all == 1, by(age)
+egen avgreadh_nocpm = mean(read) if lowreg == 0 & cpm_all == 0, by(age)
+egen avgreadl_nocpm = mean(read) if lowreg == 1 & cpm_all == 0, by(age)
+
+twoway connected avgreadh avgreadl age, sort ///
+    ytitle("NAPLAN Reading Scores", size(large)) ///
+    xtitle("Child's Age", size(large)) ///
+    graphregion(color(white)) ///
+    plotregion(color(white)) ///
+    lcolor(midblue orange) ///
+    lpattern(solid dash) ///
+    msymbol(circle triangle) ///
+    mcolor(midblue orange) ///
+    msize(large large) ///
+    legend(pos(5) ring(0) col(1) size(large) ///
+        label(1 "High Self-Regulation") label(2 "Low Self-Regulation")) ///
+    xlabel(1 "10-11" 2 "12-13" 3 "14-15", nogrid labsize(med)) ///
+    ylabel(, nogrid labsize(large))
+	
+graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/read_disp.png", replace as(png) name("Graph")
+
+twoway connected avgreadh_cpm avgreadl_cpm avgreadh_nocpm avgreadl_nocpm age, sort ///
+    ytitle("NAPLAN Reading Scores", size(large)) ///
+    xtitle("Child's Age", size(large)) ///
+    graphregion(color(white)) ///
+    plotregion(color(white)) ///
+    lcolor(midblue orange pink gold) ///
+    lpattern(solid dash solid dash) ///
+    msymbol(circle triangle sqaure diamond) ///
+    mcolor(midblue orange pink gold) ///
+    msize(large large large large) ///
+    legend(pos(5) ring(0) col(1) size(large) ///
+        label(1 "High Self-Regulation - CPM") label(2 "Low Self-Regulation - CPM") label(3 "High Self-Regulation - NoCPM") label(4 "Low Self-Regulation - NoCPM")) ///
+    xlabel(1 "10-11" 2 "12-13" 3 "14-15", nogrid labsize(med)) ///
+    ylabel(, nogrid labsize(large))	
+
+* Create individual-level trajectories plot
+
+xtline concent3, overlay i(cid) t(age) ///
+    xtitle("Age") ytitle("SDQ Hyperactivity Score") xlabel(1 "10-11" 2 "12-13" 3 "14-15", nogrid)  ///
+    legend(off)
+
+graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/indhyp.png", as(png) name("Graph") replace
+
+******** Key patterns
+
+**** (A) Study effort by Hyperactivity
+
+egen tau_l = mean(simean) if concent3 == 1, by(age)
+egen tau_h = mean(simean) if concent3 == 3, by(age)
+
+recode age (10/11 = 1 "10-11") (12/13 = 2 "12-13") (14/15 = 3 "14-15"), gen(agegrp)
+
+graph bar tau_l tau_h, over(agegrp) ///
+ytitle("Study Time (minutes)", size(large)) ///
+legend(label(1 "High Self-Regulation") label(2 "Low Self-Regulation") size(large)) ///
+graphregion(color(white)) plotregion(color(white)) /// 
+bar(1, color(midblue)) bar(2, color(pink)) ///
+blabel(bar, position(top) format(%9.2f) size(medium)) /// 
+ylabel(, labsize(large))
+
+graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/taubyhyp_bp.png", replace
+
+**** (B) CPM by Income Distribution
+
+twoway ///
+    (histogram hhinc if cpm_all==0, discrete freq color(midblue%60)) ///
+    (histogram hhinc if cpm_all==1, discrete freq color(red%60)), ///
+    legend(label(1 "No CPM") label(2 "With CPM"))
+
+ssc install binscatter
+binscatter cpm_all hhinc, nq(20) ///
+    ytitle("Share adopting CPM", size(large)) ///
+    xtitle("(Weekly) Household Income", size(large)) ///
+    xlabel(, labsize(large)) ylabel(, labsize(large))
+	
+graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/cpmadoption_bp.png", replace
+
+twoway lpoly cpm_all hhinc, ///
+    ytitle("Share adopting CPM") ///
+    xtitle("Household Income")
+
+twoway lpoly cpm_all hhinc if hhinc >= 1046.938 & hhinc <= 6126.069, ///
+    ytitle("Share adopting CPM") ///
+    xtitle("Household Income")
+
+* Panel A: Income distribution of adopters vs. non-adopters
+twoway ///
+    (histogram hhinc if cpm_all==0, discrete freq color(midblue%60)) ///
+    (histogram hhinc if cpm_all==1, discrete freq color(red%60)), ///
+    legend(label(1 "No CPM") label(2 "Use CPM")) ///
+    xtitle("Household Income") ytitle("Number of Households") ///
+    name(hist_dist, replace)
+
+* Panel B: Adoption rate by income (binscatter)
+binscatter cpm_all hhinc, nq(20) ///
+    ytitle("Share Adopting CPM") ///
+    xtitle("Household Income") ///
+    name(adoption_rate, replace)
+
+* Combine panels
+graph combine hist_dist adoption_rate, col(2) ///
+    title("CPM Adoption and Household Income")
+
+
+
