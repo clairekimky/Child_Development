@@ -1,0 +1,338 @@
+
+clear all
+
+cd "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis"
+
+********** Second Stage: Handle Missing observations
+
+use panel, clear
+
+sort cid wave
+
+***** Add labels
+
+label variable wave "Survey Wave"
+label variable schoolmean "Total hours spent at school per day"
+label variable simean "Total hours spent on self-investment per day"
+label variable tutmean "Total hours for tutoring per day"
+label variable weight_p "Population weight"
+label variable weight_s "Sample Weight"
+label variable pcodes "Postcodes"
+label variable pcode_c "Current postcodes"
+label variable sla "Statistical Local Area"
+label variable childp "Study child presence"
+label variable p1id "Parent 1 ID"
+label variable p2id "Parent 2 ID"
+label variable momid "Mother ID"
+label variable dadid "Father ID"
+label variable datint "Date of Interview"
+label variable sex "Child's Sex"
+label variable p1hs "Parent 1 Pre-college completion"
+label variable p1edu "Parent 1 Eductional Attainment"
+label variable p2hs "Parent 2 Pre-college completion"
+label variable p2edu "Parent 2 Eductional Attainment"
+label variable p1emp "Parent 1 Employment Status"
+label variable p2emp "Parent 2 Employment Status"
+label variable p1work "Parent 1 Work type"
+label variable p2work "Parent 2 Work type"
+label variable grade "Child's Current grade"
+label variable hwind "Child is given homework"
+label variable hwhr "Total hours spent on homework per week"
+label variable p1helphw "How often parent 1 helped homework"
+label variable tutorfreq "How often received tutoring"
+label variable readprog "Child's reading progress"
+label variable mathprog "Child's math progress"
+label variable achieve "Child's overall achievement"
+label variable pmind "Pocket money receipt"
+label variable pmtot "Total Pocket money amount"
+label variable cpm "pocket money if hw"
+label variable epmind "Extra pocket money receipt"
+label variable ecpm "Extra pocket money if hw"
+label variable p1inc "Parent 1 Labor Income"
+label variable p2inc "Parent 2 Labor Income"
+label variable mathint "Child's interest in math"
+label variable verbalint "Child's interest in verbal"
+label variable dowell "Child's thinks doing well"
+label variable readint "Child's interest in reading"
+label variable p2helphw "How often parent 2 helped homework"
+label variable state "Child's residence - state"
+label variable region "Child's residence - region"
+label variable remote "Child's residence - remoteness"
+label variable absra "Child's residence - abs"
+label variable epmdowell "Extra pocket money if do well"
+label variable cage "Child's age"
+label variable dob "Child's date of birth"
+label variable age "Child's Year"
+label variable testyr "NAPLAN test year"
+label variable teststate "NAPLAN test location"
+label variable testage "NAPLAN test age"
+label variable num "NAPLAN numeracy score"
+label variable read "NAPLAN reading score"
+label variable write "NAPLAN writing score"
+label variable day "TUD day of diary entry"
+
+drop dob testage
+
+*********** Destringing
+
+destring pcodes, replace
+encode cohort, gen(cohort_n) // 1 Cohort B; 2 Cohort K
+drop cohort
+
+******** Missing observations
+
+* Loop over each variable in the dataset
+foreach var of varlist _all {
+    * Replace negative values with missing values
+    replace `var' = . if `var' < 0
+}
+
+* Loop over NAPLAN variable in the dataset
+foreach var of varlist num read write {
+    * Replace negative values with missing values
+    replace `var' = . if `var' == 0
+}
+
+********** Combine day & dow
+
+replace day = dow if wave == 4
+drop dow
+
+******** Match Parent ID with Mother and Father ID using sex indicator
+
+* Value is 3 if biological child
+ 
+gen mbio = p2bio if p1sex == 1 // p1sex = 1 if Male and = 2 if Female
+replace mbio = p1bio if p1sex == 2
+replace mbio = -9 if p1sex==-9
+replace mbio = p1bio if p1sex== p2sex
+
+gen fbio = p1bio if p1sex==1
+replace fbio = p2bio if p1sex==2
+replace fbio = -9 if p1sex==-9
+replace fbio = p2bio if p1sex== p2sex
+
+******** Generate variables
+
+*(1) Child's Female Indicator
+gen female = .
+replace female = 1 if sex == 2 // Female indicator
+replace female = 0 if sex == 1 // Female indicator
+drop sex
+
+*(2) Parent's education
+
+** 1 Year 12 or equivalent; 2 Year 11 or equivalent; 3 Year 10 or equivalent; 4 Year 9 or equivalent; 5 Year 8 or below; 6 Never attended school
+
+gen mhs = p2hs if p1sex == 1 // p1sex = 1 if Male and = 2 if Female
+replace mhs = p1hs if p1sex == 2
+replace mhs = -9 if p1sex==-9
+replace mhs = p1hs if p1sex== p2sex
+
+gen fhs = p1hs if p1sex==1
+replace fhs = p2hs if p1sex==2
+replace fhs = -9 if p1sex==-9
+replace fhs = p2hs if p1sex== p2sex
+
+** 1 Postgraduate degree; 2 Graduate diploma/certificate; 3 Bachelor degree; 4 Advanced diploma/diploma; 5 Certificate; 6 Other
+
+gen medu = p2edu if p1sex == 1
+replace medu = p1edu if p1sex == 2
+replace medu = -9 if p1sex==-9
+replace medu = p1edu if p1sex== p2sex
+
+gen fedu = p1edu if p1sex==1
+replace fedu = p2edu if p1sex==2
+replace fedu = -9 if p1sex==-9
+replace fedu = p2edu if p1sex== p2sex
+
+gen medu1 = medu if wave == 4 & cohort_n == 2
+replace medu1 = medu if wave == 6 & cohort_n == 1
+
+order cid wave medu1
+
+sort cid wave
+bysort cid (wave): replace medu1 = medu1[_n-1] if wave == 5 & medu1[_n-1] ~= . & cohort_n == 2
+bysort cid (wave): replace medu1 = medu1[_n-1] if wave == 6 & medu1[_n-1] ~= . & cohort_n == 2
+bysort cid (wave): replace medu1 = medu1[_n-1] if wave == 7 & medu1[_n-1] ~= . & cohort_n == 2
+bysort cid (wave): replace medu1 = medu1[_n-1] if wave == 7 & medu1[_n-1] ~= . & cohort_n == 1
+bysort cid (wave): replace medu1 = medu1[_n-1] if wave == 8 & medu1[_n-1] ~= . & cohort_n == 1
+bysort cid (wave): replace medu1 = medu1[_n-1] if wave == 9 & medu1[_n-1] ~= . & cohort_n == 1
+
+gen fedu1 = fedu if wave == 4 & cohort_n == 2
+replace fedu1 = fedu if wave == 6 & cohort_n == 1
+
+order cid wave fedu1
+
+bysort cid (wave): replace fedu1 = fedu1[_n-1] if wave == 5 & fedu1[_n-1] ~= . & cohort_n == 2
+bysort cid (wave): replace fedu1 = fedu1[_n-1] if wave == 6 & fedu1[_n-1] ~= . & cohort_n == 2
+bysort cid (wave): replace fedu1 = fedu1[_n-1] if wave == 7 & fedu1[_n-1] ~= . & cohort_n == 2
+bysort cid (wave): replace fedu1 = fedu1[_n-1] if wave == 7 & fedu1[_n-1] ~= . & cohort_n == 1
+bysort cid (wave): replace fedu1 = fedu1[_n-1] if wave == 8 & fedu1[_n-1] ~= . & cohort_n == 1
+bysort cid (wave): replace fedu1 = fedu1[_n-1] if wave == 9 & fedu1[_n-1] ~= . & cohort_n == 1
+
+drop p1hs p2hs p1edu p2edu
+
+*(3) Parent's Labor Force Status
+
+** 1 Employed; 2 Unemployed; 3 Not in Labor Force
+
+gen memp = p2emp if p1sex == 1
+replace memp = p1emp if p1sex == 2
+replace memp = -9 if p1sex==-9
+replace memp = p1emp if p1sex== p2sex
+
+gen femp = p1emp if p1sex==1
+replace femp = p2emp if p1sex==2
+replace femp = -9 if p1sex==-9
+replace femp = p2emp if p1sex== p2sex
+
+** 1 Full time; 2 Part-time or unknown hours; 3 Maternity leave; 4 Unemployed; 5 Not in Labor force
+
+gen mwork = p2work if p1sex == 1
+replace mwork = p1work if p1sex == 2
+replace mwork = -9 if p1sex==-9
+replace mwork = p1work if p1sex== p2sex
+
+gen fwork = p1work if p1sex==1
+replace fwork = p2work if p1sex==2
+replace fwork = -9 if p1sex==-9
+replace fwork = p2work if p1sex== p2sex
+
+gen mfull = 1 if mwork == 1
+replace mfull = 0 if inrange(mwork, 2, 5)
+gen ffull = 1 if fwork == 1
+replace ffull = 0 if inrange(fwork, 2, 5)
+
+drop p1emp p2emp p1work p2work
+
+** Labor Market Income (Weekly)
+
+gen mominc = p2inc if p1sex == 1
+replace mominc = p1inc if p1sex == 2
+replace mominc = -9 if p1sex==-9
+replace mominc = p1inc if p1sex== p2sex
+
+gen dadinc = p1inc if p1sex==1
+replace dadinc = p2inc if p1sex==2
+replace dadinc = -9 if p1sex==-9
+replace dadinc = p2inc if p1sex== p2sex
+
+replace mominc = . if mominc == 0 & memp == 1 // 
+replace dadinc = . if dadinc == 0 & femp == 1 //
+
+drop p1inc p2inc
+
+************ Replacing values
+
+*(1) Child's grade
+gen grade_n = 3 if grade == 19
+replace grade_n = 4 if grade == 20
+replace grade_n = 5 if grade == 23
+replace grade_n = 6 if grade == 24
+replace grade_n = 7 if grade == 25
+replace grade_n = 8 if grade == 26
+replace grade_n = 9 if grade == 27
+replace grade_n = 10 if grade == 28
+replace grade_n = 11 if grade == 29
+
+drop grade
+rename grade_n grade
+
+*(2) Homework indicator
+replace hwind = 0 if hwind == 2 
+
+*(3) Pocket Money (weekly)
+replace pmind = 0 if pmind == 2
+
+*(4) Extra pocket money
+replace epmind = 0 if epmind == 2
+
+*(5) Weekly Pocket money amount
+* Cohort K in Wave 4 not included
+replace pmamount = pmyear * (1/52) if pmamount == . & pmyear ~= .
+replace pmamount = pmtot if pmperiod == 1 & pmamount == .
+replace pmamount = pmtot * 0.5 if pmperiod == 2 & pmamount == .
+replace pmamount = pmtot * 0.25 if pmperiod == 3 & pmamount == .
+
+* Child's concentration score
+corr concent1 concent2 concent3 concent4 concent5
+
+*(6) Childs' Age
+drop age
+gen age = 0 if wave == 3 & cohort_n == 2
+replace age = 1 if wave == 4 & cohort_n == 2
+replace age = 2 if wave == 5 & cohort_n == 2
+replace age = 3 if wave == 6 & cohort_n == 2
+replace age = 1 if wave == 6 & cohort_n == 1
+replace age = 2 if wave == 7 & cohort_n == 1
+replace age = 3 if wave == 8 & cohort_n == 1
+
+
+************* Generate weekly time use
+
+*(1) Weekdays
+gen si_weekday = simean*5 if inrange(day, 1, 5)
+*gen sleep_weekday = sleepmean * 5 if inrange(day, 1, 5)
+gen tutor_weekday = tutmean*5 if inrange(day, 1, 5)
+gen sch = schoolmean*5 if inrange(day, 1, 5)
+gen siweekday = simean if inrange(day, 1, 5)
+
+*(2) Weekends
+gen si_weekend = simean*2 if inrange(day, 6, 7)
+*gen sleep_weekend = sleepmean*2 if inrange(day, 6, 7)
+gen tutor_weekend = tutmean*2 if inrange(day, 6, 7)
+gen siweekend = simean if inrange(day, 6, 7)
+
+********** Generate total household income
+
+gen hhinc = mominc + dadinc if mominc ~= . & dadinc ~=.
+
+*CPI-adjusted income using 2010 as the index (2010 = 100)
+gen cpi = 100 if wave == 4
+replace cpi = 105.12 if wave == 5
+replace cpi = 110.37 if wave == 6
+replace cpi = 113.48 if wave == 7
+replace cpi = 117.89 if wave == 8
+
+gen hhinccpi = hhinc * 100 / cpi if hhinc ~= .
+
+sort cid age
+
+************** Generate deflated pockey money amount
+
+*replace pmamount =. if pmamount > 50
+gen pmcpi = pmamount * 100 / cpi if pmamount ~= .
+
+sort cid age
+
+************** Generate birth order
+
+gen border = .
+replace border = 1 if cage == oldage & cage ~= . & oldage ~= .
+replace border = 0 if cage < oldage & cage ~= . & oldage ~= .
+
+********************* Generate Parent's Age
+
+gen mage = p2age if p1sex == 1
+replace mage = p1age if p1sex == 2
+replace mage = -9 if p1sex==-9
+replace mage = p1age if p1sex== p2sex
+
+gen fage = p1age if p1sex==1
+replace fage = p2age if p1sex==2
+replace fage = -9 if p1sex==-9
+replace fage = p2age if p1sex== p2sex
+
+drop p1age p2age
+
+******** Sample Weight
+sort cid age
+bysort cid (age): replace samplew = samplew[_n+1] if samplew[_n] == . & samplew[_n+1] ~= .
+bysort cid (age): replace samplew = samplew[_n+1] if samplew[_n] == . & samplew[_n+1] ~= .
+
+save "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/analysis.dta", replace
+
+
+
+
