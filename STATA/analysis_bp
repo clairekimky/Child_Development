@@ -1,48 +1,65 @@
 
 clear all
+set more off
 
-cd "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis"
+*============================*
+* Project: Child Development *
+* File: analysis_bp.do          *
+*============================*
 
-********** Third Stage: Analysis
+global root "/Users/clairekim/Desktop/Project/Child Development/LSAC"
+global data "$root/analysis"
+global figs "$root/analysis/figs"
+
+cd "$data"
+
+capture mkdir "$root/logs"
+log using "$root/logs/analysis.log", replace text
+
+*====================================*
+* 1. Load and Prepare Data
+*====================================*
 
 use analysis, clear
-
 sort cid age
-
 rename cohort_n cohort
+xtset cid age
 
 ****** Sample Restriction ******
 
 /*
-All of my results are based on a selected sample of LSAC households that meet several criteria. First, only stable, two-parent households are included. Second, all children are biological (i.e., no adopted children or step-parents). Third, all selected children are at least 10 years old. Fourth, each selected child has an observed NAPLAN score. Finally, I retain only observations for children aged 10 to 15.
+All of my results are based on a selected sample of LSAC households that meet several criteria.
+First, only stable, two-parent households are included.
+Second, all children are biological (i.e., no adopted children or step-parents).
+Third, each selected child has an observed NAPLAN score at age 10-11.
+Finally, I retain only observations for children aged 10 to 15.
 */
 
 * Count sample size
 bysort cid: gen noid = [_n]
 
-*drop if cid == 11104216 & noid == 2 // Double count
-*drop if cid == 11104216 & noid == 4 // Double count
+replace fage = . if fage == 1 // Treat 1 year old father as missing
 
-*drop if cid == 71111031 & nonact == 12.5 // Weird measure
-replace fage = . if fage == 1 // Weird number
-
-xtset cid age
-
-****** Data Evidence *******
-
-*(0) Basic Summary Statistics (Table 1)
+*====================================*
+* 2. Variable Construction
+*====================================*
 
 ** Parents
 
-gen mcol = 1 if inrange(medu1, 1, 3)
-replace mcol = 0 if inrange(medu1, 4, 6)
-gen fcol = 1 if inrange(fedu1, 1, 3)
-replace fcol = 0 if inrange(fedu1, 4, 6)
+gen mcol = .
+replace mcol = 1 if inrange(medu1, 1, 3) // College moms
+replace mcol = 0 if inrange(medu1, 4, 6) // Less than college moms
+
+gen fcol = .
+replace fcol = 1 if inrange(fedu1, 1, 3) // College dads
+replace fcol = 0 if inrange(fedu1, 4, 6) // Less than college dads
 
 ****** Use uniform sample (comparable)
 
-replace simean = . if simean > 10 & schoolmean ~= . & simean ~= .
-replace simean = . if simean > 16 & simean ~= . & schoolmean == . // Exclude outliers from the sample analysis
+replace simean = . if simean > 10 & schoolmean != . & simean != .
+replace simean = . if simean > 16 & simean != . & schoolmean == . // Exclude outliers from the sample analysis
+replace siweekday = . if siweekday > 10 & schoolmean != . & siweekday != .
+replace siweekend = . if siweekend > 16 & siweekend != . & schoolmean == . // Exclude outliers from the sample analysis
 
 ***** Complete CPM
 gen cpm_n = .
@@ -52,20 +69,32 @@ replace cpm_n = 1 if ecpm == 1 // CPM + ECPM
 gen weekday = 1 if inrange(day, 1, 5)
 replace weekday = 0 if inrange(day, 6, 7)
 
-gen cpm_all = cpm_n if cpm_n ~=.
+gen cpm_all = cpm_n if cpm_n !=.
 replace cpm_all = 0 if pmind == 0
 
-replace pmamount = 0 if pmind == 0 & pmamount == .
+replace pmamount = 0 if pmind == 0 & pmamount == . // Not receiving pocket money = Not receiving CPM
 
-****** Summary Statistics 
+**** Create Parents' Employment Variable
 
-gen sampleok = !missing(hypscore, read, hhinc) & inrange(age, 1, 3) & mbio == 3 & cob == 1101 & momid ~=. & dadid ~= .
+gen jointwork = .
+replace jointwork = 0 if dadwork == 1 & inrange(momwork, 3, 5) // Dad is full-time working but mom is not working (e.g., maternity leave, unemployed, not in LF)
+replace jointwork = 1 if dadwork == 1 & momwork == 2 // Dad is full-time working but mom is part-time working
+replace jointwork = 2 if dadwork == 1 & momwork == 1 // Both dad and mom are full-time working
+
+*====================================*
+* 3. Panel Construction and Cleaning
+*====================================*
+
+gen sampleok = ///
+    inrange(age, 1, 3) & /// age 10–15
+    bio == 1 & /// biological child
+    cob == 1101 /// Australian-born
 
 tab noid if sampleok
 tab cohort if sampleok & noid == 1
 
 keep if sampleok
-keep cid age cage grade mage fage mcol fcol simean pmind weekday concent3 read num write pmamount hhinc cpm_n cpm_all numsib female border schoolmean day pmcpi hhinccpi siweekday siweekend hypscore concent1 concent2 concent4 concent5 cohort wave
+keep cid age cage grade mage fage mcol fcol jointwork momwrkhr dadwrkhr dadwork momwork mominc dadinc simean pmind weekday read num write pmamount cpm_all numsib female border schoolmean day pmcpi siweekday siweekend hypscore cohort wave
 
 xtset cid age
 xtdescribe
@@ -76,31 +105,68 @@ local total_periods = r(max) - r(min) + 1
 
 drop if n_obs < `total_periods'
 
-drop n_obs
+drop n_obs 
 
 tab cohort
 
-save "data_bp.dta", replace // Balanced panel
+*====================================*
+* 4. Measurement Adjustments
+*====================================*
 
-**** Consistent School hour
+sum schoolmean if inrange(day, 1, 5) & schoolmean != . & age == 1, detail
+sum schoolmean if inrange(day, 1, 5) & schoolmean != . & age == 2, detail
+sum schoolmean if inrange(day, 1, 5) & schoolmean != . & age == 3, detail
 
-sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 1, detail
-gen schhr = 6.666667 if age == 1 & inrange(day, 1, 5) & schoolmean ~= .
+gen schhr = .
+replace schhr = 6.666667 if age == 1 & weekday == 1 & schoolmean != .
+replace schhr = 6.783333 if age == 2 & weekday == 1 & schoolmean != .
+replace schhr = 6.75     if age == 3 & weekday == 1 & schoolmean != .
+replace schhr = 0 if weekday == 0 & inrange(age,1,3)
 
-sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 2, detail
-replace schhr = 6.783333 if age == 2 & inrange(day, 1, 5) & schoolmean ~= .
-
-sum schoolmean if inrange(day, 1, 5) & schoolmean ~= . & age == 3, detail
-replace schhr = 6.75 if age == 3 & inrange(day, 1, 5) & schoolmean ~= .
-
-replace schhr = 0 if inrange(day, 6, 7) & inrange(age, 1, 3)
-
-xtset cid age
 sort cid age
 
-keep if schhr ~= . & hhinc ~= 0
+keep if schhr != .
+keep if dadinc > 0 & dadinc != .
+keep if hypscore != .
+keep if mage != .
+keep if mcol != .
 
 replace schhr = 60*schhr
+
+*** Dealing with reporting errors in the parental income and labor supply data
+
+replace momwrkhr = 80 if momwrkhr > 80
+replace dadwrkhr = 80 if dadwrkhr > 80 // if the labor supply for a given spouse was above 80 hours per week, truncate that observation at 80
+
+gen miss = .
+replace miss = 1 if mominc > 0 & momwrkhr == 0 // the reported labor income is positive but the reported labor hours are 0
+replace miss = 1 if mominc == 0 & momwrkhr > 0 // the reported labor hours are positive but the labor income is 0
+replace miss = 1 if mominc == . & momwrkhr == . // either reported labor hours or labor income is missing
+
+gen mwage = mominc / momwrkhr if miss != 1
+gen fwage = dadinc / dadwrkhr if miss != 1
+
+gen trunc = .
+replace trunc = 1 if mwage < 7 | mwage > 210
+replace trunc = 1 if fwage < 7 | fwage > 210 // If an hourly wage rate for a given spouse was either less than 7 AUD per hour or more than 210 AUD per hour, replace that observation by a missing value
+
+*** CPI-adjusted income using 2010 as the index (2010 = 100)
+
+gen cpi = .
+replace cpi = 100 if wave == 4
+replace cpi = 105.12 if wave == 5
+replace cpi = 110.37 if wave == 6
+replace cpi = 113.48 if wave == 7
+replace cpi = 117.89 if wave == 8
+
+gen fwagecpi = fwage * 100 / cpi if fwage != .
+gen mwagecpi = mwage * 100 / cpi if mwage != .
+
+drop cpi
+
+*====================================*
+* 5. Final Sample and Dataset
+*====================================*
 
 xtset cid age
 xtdescribe
@@ -114,31 +180,46 @@ keep if num_periods == 3
 * Step 3: Drop the helper variable
 drop num_periods
 
-keep if age ~= .
+keep if age != .
 
 sort cid age 
 
-***** Demographics (Aggregate)
+save "data_bp.dta", replace
+
+use data_bp, clear
+
+bysort cid: gen noid = [_n]
+tab noid
+drop noid
+
+tab cohort
+
+*====================================*
+* 6. Descriptive Analysis
+*====================================*
 
 replace pmcpi = 0 if pmamount == 0
 
-sum pmind pmcpi cpm_all hhinccpi simean siweekday siweekend schoolmean read hypscore // Make simple tables of descriptive statistics. Put `i' in front of factor variables
+sum pmind pmcpi mage fage momwrkhr dadwrkhr mwagecpi fwagecpi cpm_all simean siweekday siweekend schoolmean read hypscore if miss != 1 & trunc != 1 // Make simple tables of descriptive statistics. Put `i' in front of factor variables
 
-sum pmcpi if pmind == 1
+sum pmcpi if pmind == 1 & miss != 1 & trunc != 1 
+
+tab dadwork if miss != 1 & trunc != 1
+tab momwork if miss != 1 & trunc != 1 
 
 ***** Main Variables disaggregated by child's age
 
-dtable pmind pmcpi cpm_all hhinccpi simean siweekday siweekend schoolmean, by(age) // Make simple tables of descriptive statistics. Put `i' in front of factor variables
+dtable pmind pmcpi cpm_all simean siweekday siweekend schoolmean momwrkhr dadwrkhr mwagecpi fwagecpi if miss != 1 & trunc != 1, by(age) // Make simple tables of descriptive statistics. Put `i' in front of factor variables
 
-dtable pmcpi if pmind == 1, by(age)
+dtable pmcpi if pmind == 1 & miss != 1 & trunc != 1, by(age)
 
-replace simean = 60*simean
-
-***** Heterogeneity in Child's SR
+*====================================*
+* 7. Heterogeneity and Mechanisms
+*====================================*
 
 * Generate Initial SR variables
 gen hyp_init = hypscore if age == 1
-bysort cid (age): replace hyp_init = hyp_init[_n-1] if hyp_init[_n] == . & hyp_init[_n-1] ~= . & age > 1 
+bysort cid (age): replace hyp_init = hyp_init[_n-1] if hyp_init[_n] == . & hyp_init[_n-1] != . & age > 1
 
 sum hypscore, detail
 sum hyp_init, detail
@@ -147,84 +228,80 @@ sum hyp_init, detail
 gen lowreg = 1 if inrange(hyp_init, 6, 10) // Low Self-Regulation (Bottom 25% of attention capacitiy)
 replace lowreg = 0 if inrange(hyp_init, 0, 1) // High Self-Regulation (Top 25% of attention capacitiy)
 
-***** Income distribution and CPM Adoption
-
-* Create income quintiles
-xtile income_quartile = hhinc, nq(4)
-
-dtable cpm_all if income_quartile == 1, by(age)
-dtable cpm_all if income_quartile == 2, by(age)
-dtable cpm_all if income_quartile == 3, by(age)
-dtable cpm_all if income_quartile == 4, by(age)
-dtable cpm_all, by(age)
-
 *** Model and Counterfactuals Motivation 
 
 * (1) Heterogeneity
-foreach var of varlist hhinccpi read simean pmcpi {
-    ttest `var', by(lowreg)
+foreach var of varlist fcol mcol read simean pmcpi {
+    ttest `var' if miss != 1 & trunc != 1, by(lowreg)
 }
 
-* (2) Are low-SR kids disproportionately in low-SES families?
-ttest hhinccpi, by(cpm_all)
-
-* (3) CPM receivers no difference in study time but it matters for no CPM
+* (2) CPM receivers no difference in study time but it matters for no CPM
 foreach var of varlist simean {
-    ttest `var' if cpm_all == 0, by(lowreg)
+    ttest `var' if cpm_all == 0 & miss != 1 & trunc != 1, by(lowreg)
 }
 foreach var of varlist simean {
-    ttest `var' if cpm_all == 1, by(lowreg)
+    ttest `var' if cpm_all == 1 & miss != 1 & trunc != 1, by(lowreg)
 }
 
-* (4) Need higher money to induce low SR children to comply with CPM contract
+* (3) Need higher money to induce low SR children to comply with CPM contract
 foreach var of varlist pmcpi {
-    ttest `var' if lowreg == 1, by(cpm_all)
+    ttest `var' if lowreg == 1 & miss != 1 & trunc != 1, by(cpm_all)
 }
 foreach var of varlist pmcpi {
-    ttest `var' if lowreg == 0, by(cpm_all)
+    ttest `var' if lowreg == 0 & miss != 1 & trunc != 1, by(cpm_all)
 }
+
+* (4) Parents' Labor Supply (Full-time vs Part-time)
+* Group means
+tabstat cpm_all pmcpi if miss != 1 & trunc != 1, by(jointwork) stats(mean sd n)
+
+* FT vs PT
+ttest cpm_all if (jointwork==1 | jointwork==2) & miss!=1 & trunc!=1, by(jointwork)
+ttest pmcpi if (jointwork==1 | jointwork==2) & miss!=1 & trunc!=1, by(jointwork)
+
+*====================================*
+* 8. Figures
+*====================================*
 
 ********* Trend in test scores (All Sample)
 
-egen avgread = mean(read), by(age)
-
+egen avgread = mean(read) if miss!=1 & trunc!=1, by(age)
+	
 line avgread age, sort ///
-    ytitle("Test Scores", size(large)) ///
+    ytitle("NAPLAN Reading Scores", size(large)) ///
     xtitle("Child's Age", size(large)) ///
     graphregion(color(white)) ///
     plotregion(color(white)) ///
-    lcolor(magenta) ///
+    lcolor(lavender) ///
+	lwidth(thick) ///
     legend(pos(5) ring(0) col(1) size(large)) ///
     xlabel(1 "10–11" 2 "12–13" 3 "14–15", nogrid labsize(med)) ///
     ylabel(, nogrid labsize(large))
 	
-graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/read_bp.png", replace as(png) name("Graph")
+graph export "$figs/read_bp.png", replace as(png) name("Graph")
 
 ********* Trend in hyperactivity (All Sample)
 
-egen avghyp = mean(hypscore), by(age)
+egen avghyp = mean(hypscore) if miss!=1 & trunc!=1, by(age)
 
 line avghyp age, sort ///
     ytitle("SDQ Hyperactivity Scale", size(large)) ///
 	xtitle("Child's Age", size(large)) ///
     graphregion(color(white)) ///
 	plotregion(color(white)) ///
+	lcolor(lavender) ///
+	lwidth(thick) ///
 	legend(pos(5) ring(0) col(1) ///
-        size(medsmall)) ///
+    size(medsmall)) ///
     xlabel(1 "10–11" 2 "12–13" 3 "14–15", nogrid labsize(med)) ///
 	ylabel(, nogrid labsize(large))
 
-graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/hyp_bp.png", replace as(png) name("Graph")
+graph export "$figs/hyp_bp.png", replace as(png) name("Graph")
 
 ********* Trend in test scores (by Hyperactivity)
 
-egen avgreadh = mean(read) if lowreg == 0, by(age)
-egen avgreadl = mean(read) if lowreg == 1, by(age)
-
-egen avgreadh_cpm = mean(read) if lowreg == 0 & cpm_all == 1, by(age)
-egen avgreadl_cpm = mean(read) if lowreg == 1 & cpm_all == 1, by(age)
-egen avgreadh_nocpm = mean(read) if lowreg == 0 & cpm_all == 0, by(age)
-egen avgreadl_nocpm = mean(read) if lowreg == 1 & cpm_all == 0, by(age)
+egen avgreadh = mean(read) if lowreg == 0 & miss!=1 & trunc!=1, by(age)
+egen avgreadl = mean(read) if lowreg == 1 & miss!=1 & trunc!=1, by(age)
 
 twoway connected avgreadh avgreadl age, sort ///
     ytitle("NAPLAN Reading Scores", size(large)) ///
@@ -232,6 +309,7 @@ twoway connected avgreadh avgreadl age, sort ///
     graphregion(color(white)) ///
     plotregion(color(white)) ///
     lcolor(midblue orange) ///
+	lwidth(thick thick) ///
     lpattern(solid dash) ///
     msymbol(circle triangle) ///
     mcolor(midblue orange) ///
@@ -241,90 +319,9 @@ twoway connected avgreadh avgreadl age, sort ///
     xlabel(1 "10-11" 2 "12-13" 3 "14-15", nogrid labsize(med)) ///
     ylabel(, nogrid labsize(large))
 	
-graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/read_disp.png", replace as(png) name("Graph")
+graph export "$figs/read_disp.png", replace as(png) name("Graph")
 
-twoway connected avgreadh_cpm avgreadl_cpm avgreadh_nocpm avgreadl_nocpm age, sort ///
-    ytitle("NAPLAN Reading Scores", size(large)) ///
-    xtitle("Child's Age", size(large)) ///
-    graphregion(color(white)) ///
-    plotregion(color(white)) ///
-    lcolor(midblue orange pink gold) ///
-    lpattern(solid dash solid dash) ///
-    msymbol(circle triangle sqaure diamond) ///
-    mcolor(midblue orange pink gold) ///
-    msize(large large large large) ///
-    legend(pos(5) ring(0) col(1) size(large) ///
-        label(1 "High Self-Regulation - CPM") label(2 "Low Self-Regulation - CPM") label(3 "High Self-Regulation - NoCPM") label(4 "Low Self-Regulation - NoCPM")) ///
-    xlabel(1 "10-11" 2 "12-13" 3 "14-15", nogrid labsize(med)) ///
-    ylabel(, nogrid labsize(large))	
-
-* Create individual-level trajectories plot
-
-xtline concent3, overlay i(cid) t(age) ///
-    xtitle("Age") ytitle("SDQ Hyperactivity Score") xlabel(1 "10-11" 2 "12-13" 3 "14-15", nogrid)  ///
-    legend(off)
-
-graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/indhyp.png", as(png) name("Graph") replace
-
-******** Key patterns
-
-**** (A) Study effort by Hyperactivity
-
-egen tau_l = mean(simean) if concent3 == 1, by(age)
-egen tau_h = mean(simean) if concent3 == 3, by(age)
-
-recode age (10/11 = 1 "10-11") (12/13 = 2 "12-13") (14/15 = 3 "14-15"), gen(agegrp)
-
-graph bar tau_l tau_h, over(agegrp) ///
-ytitle("Study Time (minutes)", size(large)) ///
-legend(label(1 "High Self-Regulation") label(2 "Low Self-Regulation") size(large)) ///
-graphregion(color(white)) plotregion(color(white)) /// 
-bar(1, color(midblue)) bar(2, color(pink)) ///
-blabel(bar, position(top) format(%9.2f) size(medium)) /// 
-ylabel(, labsize(large))
-
-graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/taubyhyp_bp.png", replace
-
-**** (B) CPM by Income Distribution
-
-twoway ///
-    (histogram hhinc if cpm_all==0, discrete freq color(midblue%60)) ///
-    (histogram hhinc if cpm_all==1, discrete freq color(red%60)), ///
-    legend(label(1 "No CPM") label(2 "With CPM"))
-
-ssc install binscatter
-binscatter cpm_all hhinc, nq(20) ///
-    ytitle("Share adopting CPM", size(large)) ///
-    xtitle("(Weekly) Household Income", size(large)) ///
-    xlabel(, labsize(large)) ylabel(, labsize(large))
-	
-graph export "/Users/clairekim/Desktop/Project/Child Development/LSAC/analysis/figs/cpmadoption_bp.png", replace
-
-twoway lpoly cpm_all hhinc, ///
-    ytitle("Share adopting CPM") ///
-    xtitle("Household Income")
-
-twoway lpoly cpm_all hhinc if hhinc >= 1046.938 & hhinc <= 6126.069, ///
-    ytitle("Share adopting CPM") ///
-    xtitle("Household Income")
-
-* Panel A: Income distribution of adopters vs. non-adopters
-twoway ///
-    (histogram hhinc if cpm_all==0, discrete freq color(midblue%60)) ///
-    (histogram hhinc if cpm_all==1, discrete freq color(red%60)), ///
-    legend(label(1 "No CPM") label(2 "Use CPM")) ///
-    xtitle("Household Income") ytitle("Number of Households") ///
-    name(hist_dist, replace)
-
-* Panel B: Adoption rate by income (binscatter)
-binscatter cpm_all hhinc, nq(20) ///
-    ytitle("Share Adopting CPM") ///
-    xtitle("Household Income") ///
-    name(adoption_rate, replace)
-
-* Combine panels
-graph combine hist_dist adoption_rate, col(2) ///
-    title("CPM Adoption and Household Income")
+log close
 
 
 
